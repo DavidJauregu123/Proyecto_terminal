@@ -1,0 +1,50 @@
+{
+  "ID0001": {
+    "clave": "ID0001",
+    "nombre": "Propedéutico de habilidades básicas de lectura, estudio e investigación",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "requisitos": []
+  },
+  "ID0101": {
+    "clave": "ID0101",
+    "nombre": "Matemáticas",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": []
+  },
+  "ID0102": {
+    "clave": "ID0102",
+    "nombre": "Cálculo Diferencial",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0101"]
+  },
+  "ID0103": {
+    "clave": "ID0103",
+    "nombre": "Organización y diseño de computadoras",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": []
+  },
+  "ID0104": {
+    "clave": "ID0104",
+    "nombre": "Cálculo Integral",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0102"]
+  },
+  "ID0105": {
+    "clave": "ID0105",
+    "nombre": "Algoritmos y estructuras de datos",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": []
+  }
+}
