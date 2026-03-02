@@ -30,7 +30,7 @@ def generar_mapa(ruta_pdf: str) -> dict:
     ciclo_actual = 0
     categoria_actual = "BÁSICA"
     
-    with pdfplumber.open(ruta_pdf, raise_unicode_errors=False) as pdf:
+    with pdfplumber.open(ruta_pdf) as pdf:
         for page in pdf.pages:
             texto = page.extract_text() or ""
             for linea in texto.splitlines():

@@ -1,0 +1,32 @@
+═══════════════════════════════════════════════════════════════
+    COMANDOS RÁPIDOS PARA INICIAR EL PROYECTO
+═══════════════════════════════════════════════════════════════
+
+📍 NAVEGAR AL PROYECTO:
+cd "c:\Users\rocko\OneDrive\Desktop\PT\david1\Proyecto_terminal"
+
+🔄 ACTIVAR AMBIENTE VIRTUAL:
+.\venv\Scripts\Activate.ps1
+
+🚀 INICIAR DASHBOARD:
+streamlit run dashboard/app.py
+
+═══════════════════════════════════════════════════════════════
+
+💡 COMANDO TODO-EN-UNO (Copiar y pegar en PowerShell):
+
+cd "c:\Users\rocko\OneDrive\Desktop\PT\david1\Proyecto_terminal"; .\venv\Scripts\Activate.ps1; streamlit run dashboard/app.py
+
+═══════════════════════════════════════════════════════════════
+
+🛑 PARA DETENER EL SERVIDOR:
+Presiona Ctrl + C en la terminal
+
+═══════════════════════════════════════════════════════════════
+
+📝 NOTAS:
+- El dashboard se abre automáticamente en http://localhost:8501
+- PostgreSQL debe estar corriendo (servicio postgresql-x64-18)
+- Si hay error de PostgreSQL, verifica que el servicio esté activo
+
+═══════════════════════════════════════════════════════════════

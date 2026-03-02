@@ -43,12 +43,14 @@ class HistorialParser:
 
     def __init__(self):
         self.materias: Dict[str, InfoMateria] = {}
+        self.creditos_totales: int = 0
+        self.creditos_acumulados: int = 0
 
     def parse_historial(self, ruta_pdf: str) -> Dict[str, InfoMateria]:
         """
         Parsea el historial académico y retorna un dict {clave: InfoMateria}
         """
-        with pdfplumber.open(ruta_pdf, raise_unicode_errors=False) as pdf:
+        with pdfplumber.open(ruta_pdf) as pdf:
             texto_completo = ""
             for page in pdf.pages:
                 texto = page.extract_text()
@@ -56,7 +58,24 @@ class HistorialParser:
                     texto_completo += texto + "\n"
 
         self.materias = self._extraer_materias(texto_completo)
+        self._extraer_creditos(texto_completo)
         return self.materias
+    
+    def _extraer_creditos(self, texto: str):
+        """
+        Extrae los créditos totales y acumulados del historial académico
+        Formato: "TOTAL DE CREDITOS DE LA LICENCIATURA: 404"
+                 "Total de Créditos Acumulados: 378"
+        """
+        # Buscar créditos totales de la licenciatura
+        match = re.search(r'TOTAL DE CR[ÉE]DITOS DE LA LICENCIATURA:\s*(\d+)', texto, re.IGNORECASE)
+        if match:
+            self.creditos_totales = int(match.group(1))
+        
+        # Buscar créditos acumulados
+        match = re.search(r'Total de Cr[ée]ditos Acumulados:\s*(\d+)', texto, re.IGNORECASE)
+        if match:
+            self.creditos_acumulados = int(match.group(1))
 
     def _extraer_materias(self, texto: str) -> Dict[str, InfoMateria]:
         """

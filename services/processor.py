@@ -102,41 +102,80 @@ class AcademicProcessor:
         
         return requisitos
     
-    def identificar_alertas(self, historial_df: pd.DataFrame) -> List[Dict]:
+    def identificar_alertas(self, historial_df: pd.DataFrame, situacion: str = "REGULAR") -> List[Dict]:
         """
         Identifica alertas académicas según las reglas
         
         Args:
             historial_df: DataFrame con historial
+            situacion: Situación académica del estudiante (REGULAR, IRREGULAR, etc.)
             
         Returns:
             Lista de alertas
         """
         alertas = []
         
-        # Contar reprobadas por materia
+        # Contar intentos por materia (solo contar registros con calificación o reprobadas)
+        intentos_por_materia = {}
         reprobadas_por_materia = {}
+        materias_actualmente_reprobadas = set()  # Materias que siguen reprobadas
+        
         for _, row in historial_df.iterrows():
-            if row["estatus"] == "REPROBADA":
-                clave = row["clave"]
+            clave = row["clave"]
+            estatus = row["estatus"]
+            
+            # Solo contar intentos reales (no EN_CURSO sin calificación)
+            if estatus in ("APROBADA", "REPROBADA"):
+                intentos_por_materia[clave] = intentos_por_materia.get(clave, 0) + 1
+            
+            # Contar solo reprobadas
+            if estatus == "REPROBADA":
                 reprobadas_por_materia[clave] = reprobadas_por_materia.get(clave, 0) + 1
         
-        # Regla 1: Tercera Oportunidad
-        for clave, count in reprobadas_por_materia.items():
-            if count >= 2:
+        # Identificar materias que siguen reprobadas (no fueron re-cursadas y aprobadas)
+        for clave, count_reprobadas in reprobadas_por_materia.items():
+            # Verificar si la materia fue aprobada después o está siendo cursada actualmente
+            aprobada = ((historial_df["clave"] == clave) & (historial_df["estatus"] == "APROBADA")).any()
+            en_curso = ((historial_df["clave"] == clave) & (historial_df["estatus"] == "EN_CURSO")).any()
+            if not aprobada and not en_curso:
+                materias_actualmente_reprobadas.add(clave)
+        
+        # Regla 1: Tercera Oportunidad (2 o más reprobaciones = en tercera oportunidad)
+        for clave in materias_actualmente_reprobadas:
+            count = reprobadas_por_materia.get(clave, 0)
+            if count >= 3:
+                alertas.append({
+                    "tipo": "BAJA_AUTOMÁTICA",
+                    "materia_clave": clave,
+                    "descripcion": f"⚠️ CRÍTICO: La materia {clave} ha sido reprobada {count} veces. Contacte con coordinación académica URGENTEMENTE.",
+                    "severidad": "CRITICA"
+                })
+            elif count >= 2:
                 alertas.append({
                     "tipo": "TERCERA_OPORTUNIDAD",
                     "materia_clave": clave,
-                    "descripcion": f"La materia {clave} está en tercera oportunidad (o más)",
+                    "descripcion": f"⚠️ La materia {clave} está en tercera oportunidad (reprobada {count} veces). Una reprobación más resulta en baja automática.",
                     "severidad": "CRITICA"
                 })
         
-        # Regla 2: Alumno Irregular (más de 1 reprobada en el semestre actual)
-        # Simplificado: si tiene muchas reprobadas en general
-        if len(reprobadas_por_materia) > 1:
+        # Regla 2: Solo mostrar alertas de materias reprobadas si hay reprobadas SIN recuperar
+        total_reprobadas_activas = len(materias_actualmente_reprobadas)
+        
+        # Si el estudiante es REGULAR, no debería tener materias reprobadas activas
+        if situacion.upper() == "REGULAR" and total_reprobadas_activas > 0:
+            # Caso excepcional: estudiante marcado como regular pero tiene reprobadas
+            # Probablemente son materias en proceso de regularización
+            pass
+        elif total_reprobadas_activas >= 3:
             alertas.append({
                 "tipo": "ALUMNO_IRREGULAR",
-                "descripcion": f"El estudiante presenta irregularidad académica con {len(reprobadas_por_materia)} materias reprobadas",
+                "descripcion": f"El estudiante presenta irregularidad académica con {total_reprobadas_activas} materias reprobadas sin regularizar",
+                "severidad": "ADVERTENCIA"
+            })
+        elif total_reprobadas_activas >= 1 and situacion.upper() != "REGULAR":
+            alertas.append({
+                "tipo": "MATERIAS_REPROBADAS",
+                "descripcion": f"El estudiante tiene {total_reprobadas_activas} materia(s) reprobada(s) pendiente(s) de regularizar",
                 "severidad": "ADVERTENCIA"
             })
         

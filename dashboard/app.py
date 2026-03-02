@@ -35,6 +35,7 @@ st.markdown("""
         border-radius: 10px;
         background-color: #f0f2f6;
         margin: 10px 0;
+        color: #1f1f1f;
     }
     .alerta-critica {
         background-color: #ffdddd;
@@ -42,6 +43,7 @@ st.markdown("""
         padding: 15px;
         margin: 10px 0;
         border-radius: 5px;
+        color: #000000;
     }
     .alerta-advertencia {
         background-color: #fff3cd;
@@ -49,12 +51,33 @@ st.markdown("""
         padding: 15px;
         margin: 10px 0;
         border-radius: 5px;
+        color: #000000;
+    }
+    .alerta-estatus {
+        background-color: #ff6b6b;
+        border: 2px solid #ff0000;
+        padding: 20px;
+        margin: 15px 0;
+        border-radius: 10px;
+        color: #ffffff;
+        font-size: 18px;
+        font-weight: bold;
+        text-align: center;
     }
     .requisito-completado {
         color: #28a745;
     }
     .requisito-pendiente {
         color: #dc3545;
+    }
+    .badge-intento {
+        background-color: #ffc107;
+        color: #000;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: bold;
+        margin-left: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -110,6 +133,91 @@ def crear_grafica_progreso_ciclo(ciclo: int, progreso: dict) -> go.Figure:
     return fig
 
 
+def filtrar_ultimo_estatus(historial_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Filtra el historial para quedarse solo con el último registro de cada materia.
+    Si una materia fue reprobada y luego aprobada, solo mantiene el registro aprobado.
+    """
+    if historial_df.empty:
+        return historial_df
+    
+    # Ordenar por periodo descendente (más reciente primero)
+    df_ordenado = historial_df.sort_values("periodo", ascending=False)
+    
+    # Quedarse con el primer registro de cada clave (el más reciente)
+    df_ultimo = df_ordenado.drop_duplicates(subset=["clave"], keep="first")
+    
+    # Reordenar por ciclo y clave para mantener orden lógico
+    df_ultimo = df_ultimo.sort_values(["ciclo", "clave"])
+    
+    return df_ultimo
+
+
+def calcular_progreso_preespecialidades(historial_df: pd.DataFrame, mapa_curricular: dict) -> dict:
+    """
+    Calcula el progreso en cada pre-especialidad.
+    Cada pre-especialidad necesita 5 materias para completarse.
+    """
+    # Identificar materias de pre-especialidad desde el historial
+    preespecialidades = {}
+    materias_procesadas = {}  # {clave: estatus_mas_reciente}
+    
+    # Buscar en el historial las materias de pre-especialidad
+    # Primero, obtener el estatus más reciente de cada materia
+    for _, row in historial_df.iterrows():
+        clave = row.get("clave", "")
+        nombre = row.get("nombre", "")
+        estatus = row.get("estatus", "")
+        periodo = row.get("periodo", "")
+        
+        # Verificar si está en el mapa como PRE-ESPECIALIDAD
+        if clave in mapa_curricular:
+            categoria = mapa_curricular[clave].get("categoria", "")
+            if categoria in ("PRE_ESPECIALIDAD", "PRE-ESPECIALIDAD"):
+                # Determinar a qué pre-especialidad pertenece por el nombre
+                if "inteligencia" in nombre.lower() and ("negocios" in nombre.lower() or "organizacional" in nombre.lower()):
+                    pre_esp = "Inteligencia Organizacional y de Negocios"
+                elif "innovación" in nombre.lower() or "innovacion" in nombre.lower() or "tic" in nombre.lower():
+                    pre_esp = "Innovación en TIC"
+                else:
+                    # Si no podemos determinar por nombre, intentar por código
+                    # ID3416-ID3419, ID3469 = IoN
+                    if clave in ["ID3416", "ID3417", "ID3418", "ID3419", "ID3469"]:
+                        pre_esp = "Inteligencia Organizacional y de Negocios"
+                    else:
+                        pre_esp = "Innovación en TIC"
+                
+                # Guardar o actualizar el estatus más reciente (último periodo)
+                if clave not in materias_procesadas or periodo > materias_procesadas[clave]["periodo"]:
+                    materias_procesadas[clave] = {
+                        "pre_esp": pre_esp,
+                        "estatus": estatus,
+                        "periodo": periodo,
+                        "nombre": nombre
+                    }
+    
+    # Ahora contar por pre-especialidad usando solo el estatus más reciente
+    for clave, datos in materias_procesadas.items():
+        pre = datos["pre_esp"]
+        estatus = datos["estatus"]
+        
+        # Inicializar si no existe
+        if pre not in preespecialidades:
+            preespecialidades[pre] = {"total": 0, "aprobadas": 0, "en_curso": 0, "claves": []}
+        
+        # Agregar clave
+        preespecialidades[pre]["claves"].append(clave)
+        preespecialidades[pre]["total"] += 1
+        
+        # Contar estado actual (última aparición de la materia)
+        if estatus == "APROBADA":
+            preespecialidades[pre]["aprobadas"] += 1
+        elif estatus == "EN_CURSO":
+            preespecialidades[pre]["en_curso"] += 1
+    
+    return preespecialidades
+
+
 def main():
     """Función principal de la aplicación"""
     
@@ -143,7 +251,15 @@ def main():
                     with st.spinner("Procesando historial académico..."):
                         with open("temp_historial.pdf", "wb") as f:
                             f.write(historial_file.getvalue())
+                        
+                        # Generar mapa curricular
                         mapa = generar_mapa("temp_historial.pdf")
+                        
+                        # Extraer créditos del historial
+                        from parsers.historial_parser import HistorialParser
+                        historial_parser = HistorialParser()
+                        historial_parser.parse_historial("temp_historial.pdf")
+                        
                         if os.path.exists("temp_historial.pdf"):
                             os.remove("temp_historial.pdf")
 
@@ -153,8 +269,11 @@ def main():
                         with open(mapa_path, "w", encoding="utf-8") as f:
                             json.dump(mapa, f, ensure_ascii=False, indent=2)
                         st.session_state.mapa_curricular = mapa
+                        st.session_state.creditos_totales = historial_parser.creditos_totales
+                        st.session_state.creditos_acumulados = historial_parser.creditos_acumulados
 
                     st.success(f"✅ Mapa actualizado: {len(mapa)} materias cargadas")
+                    st.info(f"📊 Créditos: {historial_parser.creditos_acumulados}/{historial_parser.creditos_totales}")
                 except Exception as e:
                     import traceback
                     st.error(f"❌ Error al procesar historial: {str(e)}")
@@ -224,6 +343,21 @@ def main():
     historial_df = st.session_state.historial_df
     
     # ========== SECCIÓN 1: DATOS DEL ESTUDIANTE ==========
+    st.header(f"👤 {datos.nombre}")
+    
+    # Alerta si el estatus NO es Regular
+    if datos.situacion.upper() != "REGULAR":
+        st.markdown(f"""
+        <div class='alerta-estatus'>
+            ⚠️ ATENCIÓN: ESTATUS ACADÉMICO - {datos.situacion.upper()} ⚠️
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Usar créditos del historial académico si están disponibles
+    creditos_totales = st.session_state.get("creditos_totales", 404)  # Default 404
+    creditos_acumulados = st.session_state.get("creditos_acumulados", datos.total_creditos)
+    creditos_faltantes = max(0, creditos_totales - creditos_acumulados)
+    
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -231,9 +365,16 @@ def main():
     with col2:
         st.metric("Plan de Estudios", datos.plan_estudios)
     with col3:
-        st.metric("Total Créditos", datos.total_creditos)
+        st.metric("Créditos Acumulados", f"{creditos_acumulados}/{creditos_totales}")
     with col4:
         st.metric("Promedio General", f"{datos.promedio_general:.2f}")
+    
+    # Mostrar créditos faltantes en métrica destacada
+    col_cred1, col_cred2, col_cred3 = st.columns(3)
+    with col_cred2:
+        st.metric("⏳ Créditos Faltantes", creditos_faltantes, 
+                 delta=f"-{creditos_faltantes} para graduarse" if creditos_faltantes > 0 else "✅ Completado",
+                 delta_color="inverse")
     
     st.markdown("---")
     
@@ -243,8 +384,11 @@ def main():
     mapa_curricular = cargar_mapa_curricular()
     processor = AcademicProcessor(mapa_curricular)
     
+    # Filtrar historial para quedarse solo con el último estatus de cada materia
+    historial_filtrado = filtrar_ultimo_estatus(historial_df)
+    
     try:
-        alertas = processor.identificar_alertas(historial_df)
+        alertas = processor.identificar_alertas(historial_filtrado, datos.situacion)
         
         if alertas:
             for alerta in alertas:
@@ -273,7 +417,8 @@ def main():
     st.header("📈 Progreso por Ciclo")
     
     try:
-        progreso_ciclos = processor.calcular_progreso_por_ciclo(historial_df)
+        # Usar historial filtrado para mostrar solo el estado actual de cada materia
+        progreso_ciclos = processor.calcular_progreso_por_ciclo(historial_filtrado)
         
         # Mostrar solo ciclos 1-4 (excluir co-curricular ciclo=0)
         ciclos_validos = sorted(c for c in progreso_ciclos.keys() if 1 <= c <= 4)
@@ -282,6 +427,7 @@ def main():
             cols = st.columns(len(ciclos_validos))
             for j, ciclo in enumerate(ciclos_validos):
                 progreso = progreso_ciclos[ciclo]
+                
                 with cols[j]:
                     fig = crear_grafica_progreso_ciclo(ciclo, {
                         "finalizadas": progreso.finalizadas,
@@ -304,11 +450,71 @@ def main():
     
     st.markdown("---")
     
+    # ========== SECCIÓN 3.5: PROGRESO DE PRE-ESPECIALIDADES ==========
+    st.header("🎓 Progreso en Pre-Especialidades")
+    st.caption("Cada pre-especialidad requiere 5 materias para completarse. La pre-especialidad con más materias aprobadas será tu titulación.")
+    
+    try:
+        mapa_curricular = cargar_mapa_curricular()
+        # Usar historial filtrado para evitar contar múltiples intentos
+        preespecialidades = calcular_progreso_preespecialidades(historial_filtrado, mapa_curricular)
+        
+        if preespecialidades:
+            cols_pre = st.columns(len(preespecialidades))
+            for idx, (nombre, datos) in enumerate(preespecialidades.items()):
+                with cols_pre[idx]:
+                    aprobadas = datos["aprobadas"]
+                    en_curso = datos["en_curso"]
+                    total_requerido = 5  # Cada pre-especialidad requiere 5 materias
+                    porcentaje = (aprobadas / total_requerido * 100) if total_requerido > 0 else 0
+                    
+                    # Determinar color según progreso
+                    if aprobadas >= 5:
+                        color_badge = "🟢"
+                        estado = "COMPLETADA"
+                    elif aprobadas >= 3:
+                        color_badge = "🟡"
+                        estado = "EN PROGRESO"
+                    else:
+                        color_badge = "⚪"
+                        estado = "INICIAL"
+                    
+                    fig = go.Figure(data=[go.Pie(
+                        labels=["Aprobadas", "En Curso", "Pendientes"],
+                        values=[aprobadas, en_curso, max(0, total_requerido - aprobadas - en_curso)],
+                        marker=dict(colors=["#28a745", "#ffc107", "#e0e0e0"]),
+                        hole=0.5
+                    )])
+                    
+                    fig.update_layout(
+                        title=f"{color_badge} {nombre}",
+                        showlegend=True,
+                        height=350
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.markdown(f"""
+                    <div class='metric-box'>
+                        <strong>{porcentaje:.1f}% Completado</strong><br>
+                        <strong>Estado: {estado}</strong><br>
+                        ✅ Aprobadas: {aprobadas}/5<br>
+                        ⏳ En Curso: {en_curso}<br>
+                        📚 Faltan: {max(0, 5 - aprobadas)} materias
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.info("No se detectaron materias de pre-especialidad en el historial.")
+    except Exception as e:
+        st.warning(f"Error al calcular pre-especialidades: {str(e)}")
+    
+    st.markdown("---")
+    
     # ========== SECCIÓN 4: REQUISITOS ADICIONALES ==========
     st.header("📋 Requisitos Adicionales")
     
     try:
-        requisitos = processor.calcular_requisitos(historial_df)
+        # Usar historial filtrado para verificar estado actual
+        requisitos = processor.calcular_requisitos(historial_filtrado)
     except Exception:
         requisitos = {"Actividad Deportiva": False, "Actividad Cultural": False, "Inglés": False}
     
@@ -336,23 +542,57 @@ def main():
             "SIN_REGISTRAR": "⚪"
         }
         
-        if "ciclo" in historial_df.columns:
-            grupos = historial_df.sort_values(["ciclo", "clave"]).groupby("ciclo", sort=True)
+        # Detectar materias duplicadas (múltiples intentos)
+        conteo_materias = historial_df.groupby("clave").size().to_dict()
+        
+        # Para cada materia duplicada, obtener último registro
+        historial_limpio = historial_df.copy()
+        historial_limpio["intentos"] = historial_limpio["clave"].map(conteo_materias)
+        
+        # Ordenar por periodo DESC para obtener el último intento
+        historial_limpio = historial_limpio.sort_values(["periodo"], ascending=False)
+        
+        # Crear columna de badge para múltiples intentos
+        def crear_badge_intento(row):
+            intentos = row["intentos"]
+            if intentos >= 3:
+                return " 🔴 3ª VEZ"
+            elif intentos == 2:
+                return " 🟡 2ª VEZ"
+            return ""
+        
+        historial_limpio["badge_intento"] = historial_limpio.apply(crear_badge_intento, axis=1)
+        
+        if "ciclo" in historial_limpio.columns:
+            grupos = historial_limpio.sort_values(["ciclo", "clave"]).groupby("ciclo", sort=True)
         else:
-            grupos = historial_df.sort_values(["periodo", "clave"]).groupby("periodo", sort=True)
+            grupos = historial_limpio.sort_values(["periodo", "clave"]).groupby("periodo", sort=True)
         
         for grupo_key, grupo_df in grupos:
-            ciclo_num = int(grupo_key) if "ciclo" in historial_df.columns else 0
+            ciclo_num = int(grupo_key) if "ciclo" in historial_limpio.columns else 0
             nombre_ciclo = NOMBRES_CICLO.get(ciclo_num, f"Ciclo {ciclo_num}")
             expandir = ciclo_num == 1
             
-            aprobadas = (grupo_df["estatus"] == "APROBADA").sum()
-            total = len(grupo_df)
-            creditos = grupo_df[grupo_df["estatus"] == "APROBADA"]["creditos"].sum()
+            # Mostrar solo el último intento de cada materia
+            grupo_df_unico = grupo_df.drop_duplicates(subset=["clave"], keep="first")
+            
+            aprobadas = (grupo_df_unico["estatus"] == "APROBADA").sum()
+            total = len(grupo_df_unico)
+            creditos = grupo_df_unico[grupo_df_unico["estatus"] == "APROBADA"]["creditos"].sum()
             
             with st.expander(f"📅 {nombre_ciclo}  |  {aprobadas}/{total} aprobadas  |  {creditos} créditos", expanded=expandir):
-                display_df = grupo_df[["clave", "nombre", "calificacion", "creditos", "estatus"]].copy()
+                display_df = grupo_df_unico[["clave", "nombre", "calificacion", "creditos", "estatus", "badge_intento"]].copy()
+                
+                # Formatear calificación (manejar None)
+                display_df["calificacion"] = display_df["calificacion"].apply(
+                    lambda x: f"{x:.1f}" if x is not None and isinstance(x, (int, float)) else "S/A" if x is None else str(x)
+                )
+                
+                # Agregar badge a nombre si hay múltiples intentos
+                display_df["nombre"] = display_df["nombre"] + display_df["badge_intento"]
+                
                 display_df["estatus"] = display_df["estatus"].map(lambda e: f"{estatus_color.get(e, '')} {e}")
+                display_df = display_df[["clave", "nombre", "calificacion", "creditos", "estatus"]]
                 display_df.columns = ["Clave", "Asignatura", "Calificación", "Créditos", "Estatus"]
                 st.dataframe(display_df, use_container_width=True, hide_index=True)
 

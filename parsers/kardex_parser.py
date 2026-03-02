@@ -45,7 +45,7 @@ class KardexParser:
         Returns:
             DatosEstudiante con toda la información extraída
         """
-        with pdfplumber.open(ruta_pdf, raise_unicode_errors=False) as pdf:
+        with pdfplumber.open(ruta_pdf) as pdf:
             texto_completo = ""
             for page in pdf.pages:
                 try:
@@ -90,9 +90,18 @@ class KardexParser:
         if match:
             datos["matricula"] = match.group(1)
         
-        match = re.search(r"Nombre:\s*(.+?)(?:\n|Plan de Estudios)", texto)
+        # Extraer nombre completo (formato: APELLIDO / NOMBRE)
+        match = re.search(r"Nombre:\s*([A-ZÁÉÍÓÚÑ\s/]+?)\s*(\d{6,}|Plan de Estudios|Situaci)", texto, re.IGNORECASE)
         if match:
-            datos["nombre"] = match.group(1).strip()
+            nombre_completo = match.group(1).strip()
+            # Convertir "APELLIDO / NOMBRE" a "Nombre Apellido"
+            if "/" in nombre_completo:
+                partes = nombre_completo.split("/")
+                apellido = partes[0].strip().title()
+                nombre = partes[1].strip().title() if len(partes) > 1 else ""
+                datos["nombre"] = f"{nombre} {apellido}".strip()
+            else:
+                datos["nombre"] = nombre_completo.title()
         
         match = re.search(r"Plan de Estudios:\s*(\S+)", texto)
         if match:
@@ -137,19 +146,43 @@ class KardexParser:
             
             # Procesar calificación y estatus
             calificacion = None
-            if calificacion_str.upper() in ("S/A", "--", ""):
-                estatus = "SIN_REGISTRAR" if calificacion_str.upper() == "S/A" else "EN_CURSO"
+            cal_upper = calificacion_str.upper()
+            
+            # S/A = Asignatura SÍ aprobada (sin calificación numérica)
+            if cal_upper == "S/A":
+                estatus = "APROBADA"
+                calificacion = None  # No tiene nota numérica
+            # N/A, N = Asignatura NO aprobada EXPLÍCITAMENTE
+            elif cal_upper in ("N/A", "N", "NP"):
+                estatus = "REPROBADA"
+                calificacion = 0.0
+            # Sin calificación o guiones = En curso o sin registrar
+            elif cal_upper in ("", "--", "S/G"):
+                estatus = "EN_CURSO"
+                calificacion = None
+            # Calificación numérica
             else:
                 try:
                     calificacion = float(calificacion_str)
-                    estatus = "APROBADA" if calificacion >= 6.0 else "REPROBADA"
+                    # REGLA IMPORTANTE: calificación 0 o 0.0 = EN CURSO (no reprobada)
+                    if calificacion == 0.0 or calificacion == 0:
+                        estatus = "EN_CURSO"
+                        calificacion = None
+                    elif calificacion >= 6.0:
+                        estatus = "APROBADA"
+                    else:
+                        # Calificación entre 0 y 6 (pero no 0) = reprobada
+                        estatus = "REPROBADA"
                 except ValueError:
+                    # Si no se puede convertir a número, asumir en curso
                     estatus = "EN_CURSO"
+                    calificacion = None
             
-            # Materia con asterisco = reprobada (aunque tenga nota >= 6 en reposición)
+            # Materia con asterisco = reprobada (solo si tiene calificación < 6)
             linea = match.group(0)
-            if linea.lstrip().startswith("*") and calificacion is not None and calificacion < 6.0:
-                estatus = "REPROBADA"
+            if linea.lstrip().startswith("*"):
+                if calificacion is not None and calificacion < 6.0:
+                    estatus = "REPROBADA"
             
             try:
                 creditos = int(creditos_str)
