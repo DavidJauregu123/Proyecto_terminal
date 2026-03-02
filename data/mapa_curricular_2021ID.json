@@ -1,4 +1,13 @@
 {
+<<<<<<< Updated upstream
+=======
+  "DP0001": {
+    "ciclo": 1,
+    "categoria": "BÁSICA",
+    "creditos": 6,
+    "calificacion": 9.0
+  },
+>>>>>>> Stashed changes
   "DP0191": {
     "ciclo": 1,
     "categoria": "BÁSICA",
@@ -33,12 +42,54 @@
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 8,
+<<<<<<< Updated upstream
     "calificacion": 10.0
   },
+=======
+    "calificacion": 9.0
+  },
+  "ID0104": {
+    "ciclo": 1,
+    "categoria": "BÁSICA",
+    "creditos": 8,
+    "calificacion": null
+  },
+  "ID0105": {
+    "ciclo": 1,
+    "categoria": "BÁSICA",
+    "creditos": 8,
+    "calificacion": 10.0
+  },
+  "ID0106": {
+    "ciclo": 1,
+    "categoria": "BÁSICA",
+    "creditos": 8,
+    "calificacion": 9.0
+  },
+  "ID0107": {
+    "ciclo": 1,
+    "categoria": "BÁSICA",
+    "creditos": 8,
+    "calificacion": 9.0
+  },
+  "ID0108": {
+    "ciclo": 1,
+    "categoria": "BÁSICA",
+    "creditos": 6,
+    "calificacion": 8.0
+  },
+  "II0002": {
+    "ciclo": 1,
+    "categoria": "BÁSICA",
+    "creditos": 8,
+    "calificacion": 8.0
+  },
+>>>>>>> Stashed changes
   "II0106": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 8,
+<<<<<<< Updated upstream
     "calificacion": 8.0
   },
   "II0209": {
@@ -58,12 +109,15 @@
     "categoria": "BÁSICA",
     "creditos": 6,
     "calificacion": 7.0
+=======
+    "calificacion": null
+>>>>>>> Stashed changes
   },
   "IT0161": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": 10.0
   },
   "IT0264": {
     "ciclo": 1,
@@ -99,25 +153,43 @@
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 6,
+<<<<<<< Updated upstream
     "calificacion": 9.0
+=======
+    "calificacion": 7.0
+>>>>>>> Stashed changes
   },
   "DP0396": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 6,
+<<<<<<< Updated upstream
     "calificacion": 10.0
+=======
+    "calificacion": 8.0
+  },
+  "IA0209": {
+    "ciclo": 2,
+    "categoria": "BÁSICA",
+    "creditos": 8,
+    "calificacion": null
+>>>>>>> Stashed changes
   },
   "ID0204": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 8,
+<<<<<<< Updated upstream
     "calificacion": 9.0
+=======
+    "calificacion": 7.0
+>>>>>>> Stashed changes
   },
   "ID0205": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": 8.0
   },
   "ID0206": {
     "ciclo": 2,
@@ -143,6 +215,27 @@
     "creditos": 6,
     "calificacion": 7.0
   },
+<<<<<<< Updated upstream
+=======
+  "ID0208": {
+    "ciclo": 2,
+    "categoria": "BÁSICA",
+    "creditos": 6,
+    "calificacion": 7.0
+  },
+  "ID0265": {
+    "ciclo": 2,
+    "categoria": "BÁSICA",
+    "creditos": 6,
+    "calificacion": 8.0
+  },
+  "ID0308": {
+    "ciclo": 2,
+    "categoria": "BÁSICA",
+    "creditos": 8,
+    "calificacion": null
+  },
+>>>>>>> Stashed changes
   "II0322": {
     "ciclo": 2,
     "categoria": "BÁSICA",
@@ -153,12 +246,15 @@
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 8,
+<<<<<<< Updated upstream
     "calificacion": 9.0
   },
   "IT0107": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 8,
+=======
+>>>>>>> Stashed changes
     "calificacion": null
   },
   "IT0210": {
@@ -171,13 +267,13 @@
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 10,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "ID0262": {
     "ciclo": 2,
     "categoria": "ELECCIÓN LIBRE",
     "creditos": 6,
-    "calificacion": null
+    "calificacion": 9.0
   },
   "ID0263": {
     "ciclo": 2,
@@ -189,7 +285,7 @@
     "ciclo": 2,
     "categoria": "ELECCIÓN LIBRE",
     "creditos": 6,
-    "calificacion": 10.0
+    "calificacion": null
   },
   "ID0265": {
     "ciclo": 2,
@@ -201,18 +297,23 @@
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 10.0
+    "calificacion": 8.0
   },
   "DP0498": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
+<<<<<<< Updated upstream
     "calificacion": 10.0
+=======
+    "calificacion": null
+>>>>>>> Stashed changes
   },
   "ID0307": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
+<<<<<<< Updated upstream
     "calificacion": 10.0
   },
   "ID0308": {
@@ -220,24 +321,47 @@
     "categoria": "BÁSICA",
     "creditos": 8,
     "calificacion": 9.0
+=======
+    "calificacion": null
+>>>>>>> Stashed changes
   },
   "ID0309": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
+<<<<<<< Updated upstream
     "calificacion": 8.0
+=======
+    "calificacion": null
+>>>>>>> Stashed changes
   },
   "ID0310": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 8,
+<<<<<<< Updated upstream
     "calificacion": 10.0
+=======
+    "calificacion": 9.0
+  },
+  "ID0311": {
+    "ciclo": 3,
+    "categoria": "BÁSICA",
+    "creditos": 6,
+    "calificacion": null
+  },
+  "ID3470": {
+    "ciclo": 3,
+    "categoria": "BÁSICA",
+    "creditos": 6,
+    "calificacion": null
+>>>>>>> Stashed changes
   },
   "IT0208": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "IT0263": {
     "ciclo": 3,
@@ -261,7 +385,7 @@
     "ciclo": 4,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 10.0
+    "calificacion": null
   },
   "ID0411": {
     "ciclo": 4,
@@ -279,7 +403,7 @@
     "ciclo": 4,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "ID0414": {
     "ciclo": 4,
@@ -333,7 +457,7 @@
     "ciclo": 3,
     "categoria": "ELECCIÓN LIBRE",
     "creditos": 6,
-    "calificacion": null
+    "calificacion": 9.0
   },
   "ID3469": {
     "ciclo": 3,
@@ -399,7 +523,7 @@
     "ciclo": 3,
     "categoria": "ELECCIÓN LIBRE",
     "creditos": 6,
-    "calificacion": null
+    "calificacion": 9.0
   },
   "IT3472": {
     "ciclo": 3,
@@ -477,6 +601,7 @@
     "ciclo": 3,
     "categoria": "PRE-ESPECIALIDAD",
     "creditos": 6,
+<<<<<<< Updated upstream
     "calificacion": 9.0
   },
   "AD0002": {
@@ -486,6 +611,47 @@
     "calificacion": null
   },
   "TA0019": {
+=======
+    "calificacion": null
+  },
+  "ID3469": {
+    "ciclo": 3,
+    "categoria": "PRE-ESPECIALIDAD",
+    "creditos": 6,
+    "calificacion": null
+  },
+  "ID3420": {
+    "ciclo": 3,
+    "categoria": "PRE-ESPECIALIDAD",
+    "creditos": 6,
+    "calificacion": null
+  },
+  "ID3421": {
+    "ciclo": 3,
+    "categoria": "PRE-ESPECIALIDAD",
+    "creditos": 6,
+    "calificacion": null
+  },
+  "ID3422": {
+    "ciclo": 3,
+    "categoria": "PRE-ESPECIALIDAD",
+    "creditos": 6,
+    "calificacion": 10.0
+  },
+  "ID3423": {
+    "ciclo": 3,
+    "categoria": "PRE-ESPECIALIDAD",
+    "creditos": 6,
+    "calificacion": null
+  },
+  "ID3424": {
+    "ciclo": 3,
+    "categoria": "PRE-ESPECIALIDAD",
+    "creditos": 6,
+    "calificacion": null
+  },
+  "TA0005": {
+>>>>>>> Stashed changes
     "ciclo": 0,
     "categoria": "CO-CURRICULAR",
     "creditos": 0,
