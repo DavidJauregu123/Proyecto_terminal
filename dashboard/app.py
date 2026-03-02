@@ -141,22 +141,136 @@ def filtrar_ultimo_estatus(historial_df: pd.DataFrame) -> pd.DataFrame:
     if historial_df.empty:
         return historial_df
     
+    # Asegurar que periodo existe y convertir a string para ordenar
+    if "periodo" not in historial_df.columns:
+        return historial_df
+    
     # Ordenar por periodo descendente (más reciente primero)
-    df_ordenado = historial_df.sort_values("periodo", ascending=False)
+    df_ordenado = historial_df.sort_values("periodo", ascending=False, na_position='last')
     
     # Quedarse con el primer registro de cada clave (el más reciente)
     df_ultimo = df_ordenado.drop_duplicates(subset=["clave"], keep="first")
     
     # Reordenar por ciclo y clave para mantener orden lógico
-    df_ultimo = df_ultimo.sort_values(["ciclo", "clave"])
+    if "ciclo" in df_ultimo.columns:
+        df_ultimo = df_ultimo.sort_values(["ciclo", "clave"], na_position='last')
     
     return df_ultimo
+
+
+def calcular_eleccion_libre(historial_df: pd.DataFrame, mapa_curricular: dict) -> dict:
+    """
+    Calcula el progreso de materias de elección libre por ciclo.
+    Usa el historial académico como fuente de verdad para identificar materias de elección libre.
+    Reglas:
+    - Ciclo 1: 2 materias de elección libre requeridas
+    - Ciclo 2: 2 materias de elección libre requeridas
+    - Ciclos 3 y 4 combinados: 8 materias totales (incluyendo materias de pre-especialidad NO usada)
+    """
+    eleccion_libre = {
+        1: {"aprobadas": 0, "en_curso": 0, "requeridas": 2, "claves": [], "nombres": []},
+        2: {"aprobadas": 0, "en_curso": 0, "requeridas": 2, "claves": [], "nombres": []},
+        "3_y_4": {"aprobadas": 0, "en_curso": 0, "requeridas": 8, "claves": [], "nombres": []}
+    }
+    
+    # Primero identificar qué pre-especialidad tiene más materias aprobadas (será la de titulación)
+    # CORRECCIÓN: Invertir la lógica - los códigos ID342X son ITIC, ID341X son IoN
+    pre_especialidades = {"IoN": 0, "ITIC": 0}
+    
+    for _, row in historial_df.iterrows():
+        clave = row.get("clave", "")
+        nombre = row.get("nombre", "")
+        estatus = row.get("estatus", "")
+        
+        if clave in mapa_curricular:
+            categoria = mapa_curricular[clave].get("categoria", "")
+            if categoria in ("PRE_ESPECIALIDAD", "PRE-ESPECIALIDAD") and estatus == "APROBADA":
+                # CORRECCIÓN: Identificación basada en el nombre de la materia desde el historial
+                if "inteligencia" in nombre.lower() and ("negocios" in nombre.lower() or "organizacional" in nombre.lower()):
+                    pre_especialidades["IoN"] += 1
+                elif "innovaci" in nombre.lower() and "tic" in nombre.lower():
+                    pre_especialidades["ITIC"] += 1
+                # Fallback por código si no hay nombre claro
+                # ID3420-ID3424 = Inteligencia Organizacional y de Negocios
+                # ID3415-ID3419 = Innovación en TIC
+                elif clave in ["ID3420", "ID3421", "ID3422", "ID3423", "ID3424"]:
+                    pre_especialidades["IoN"] += 1
+                elif clave in ["ID3415", "ID3416", "ID3417", "ID3418", "ID3419"]:
+                    pre_especialidades["ITIC"] += 1
+    
+    # Determinar pre-especialidad de titulación (la que tiene más aprobadas)
+    pre_titulacion = "IoN" if pre_especialidades["IoN"] > pre_especialidades["ITIC"] else "ITIC"
+    
+    # Ahora contar materias de elección libre - USAR EL HISTORIAL ACADÉMICO COMO FUENTE DE VERDAD
+    for _, row in historial_df.iterrows():
+        clave = row.get("clave", "")
+        nombre = row.get("nombre", "")
+        estatus = row.get("estatus", "")
+        
+        if clave not in mapa_curricular:
+            continue
+            
+        ciclo = mapa_curricular[clave].get("ciclo", 0)
+        categoria = mapa_curricular[clave].get("categoria", "")
+        
+        # Caso 1: Materias explícitamente de elección libre según el historial académico
+        if "ELECCI" in categoria.upper() and "LIBRE" in categoria.upper():
+            if ciclo == 1:
+                if estatus == "APROBADA":
+                    eleccion_libre[1]["aprobadas"] += 1
+                elif estatus == "EN_CURSO":
+                    eleccion_libre[1]["en_curso"] += 1
+                eleccion_libre[1]["claves"].append(clave)
+                eleccion_libre[1]["nombres"].append(nombre)
+            elif ciclo == 2:
+                if estatus == "APROBADA":
+                    eleccion_libre[2]["aprobadas"] += 1
+                elif estatus == "EN_CURSO":
+                    eleccion_libre[2]["en_curso"] += 1
+                eleccion_libre[2]["claves"].append(clave)
+                eleccion_libre[2]["nombres"].append(nombre)
+            elif ciclo in (3, 4):
+                if estatus == "APROBADA":
+                    eleccion_libre["3_y_4"]["aprobadas"] += 1
+                elif estatus == "EN_CURSO":
+                    eleccion_libre["3_y_4"]["en_curso"] += 1
+                eleccion_libre["3_y_4"]["claves"].append(clave)
+                eleccion_libre["3_y_4"]["nombres"].append(nombre)
+        
+        # Caso 2: Materias de la pre-especialidad NO usada para titular cuentan como elección libre en ciclos 3 y 4
+        elif categoria in ("PRE_ESPECIALIDAD", "PRE-ESPECIALIDAD") and ciclo in (3, 4):
+            # Determinar a qué pre-especialidad pertenece
+            if "inteligencia" in nombre.lower() and ("negocios" in nombre.lower() or "organizacional" in nombre.lower()):
+                pre_materia = "IoN"
+            elif "innovaci" in nombre.lower() and "tic" in nombre.lower():
+                pre_materia = "ITIC"
+            # Fallback por código
+            # ID3420-ID3424 = Inteligencia Organizacional y de Negocios
+            # ID3415-ID3419 = Innovación en TIC
+            elif clave in ["ID3420", "ID3421", "ID3422", "ID3423", "ID3424"]:
+                pre_materia = "IoN"
+            elif clave in ["ID3415", "ID3416", "ID3417", "ID3418", "ID3419"]:
+                pre_materia = "ITIC"
+            else:
+                pre_materia = None
+            
+            # Si NO es la pre-especialidad de titulación, cuenta como elección libre
+            if pre_materia and pre_materia != pre_titulacion:
+                if estatus == "APROBADA":
+                    eleccion_libre["3_y_4"]["aprobadas"] += 1
+                elif estatus == "EN_CURSO":
+                    eleccion_libre["3_y_4"]["en_curso"] += 1
+                eleccion_libre["3_y_4"]["claves"].append(clave)
+                eleccion_libre["3_y_4"]["nombres"].append(nombre)
+    
+    return eleccion_libre, pre_titulacion, pre_especialidades
 
 
 def calcular_progreso_preespecialidades(historial_df: pd.DataFrame, mapa_curricular: dict) -> dict:
     """
     Calcula el progreso en cada pre-especialidad.
     Cada pre-especialidad necesita 5 materias para completarse.
+    CORRECCIÓN: Usar nombres de materias del historial como fuente de verdad.
     """
     # Identificar materias de pre-especialidad desde el historial
     preespecialidades = {}
@@ -174,18 +288,21 @@ def calcular_progreso_preespecialidades(historial_df: pd.DataFrame, mapa_curricu
         if clave in mapa_curricular:
             categoria = mapa_curricular[clave].get("categoria", "")
             if categoria in ("PRE_ESPECIALIDAD", "PRE-ESPECIALIDAD"):
-                # Determinar a qué pre-especialidad pertenece por el nombre
+                # CORRECCIÓN: Determinar a qué pre-especialidad pertenece por el nombre desde el historial
                 if "inteligencia" in nombre.lower() and ("negocios" in nombre.lower() or "organizacional" in nombre.lower()):
                     pre_esp = "Inteligencia Organizacional y de Negocios"
-                elif "innovación" in nombre.lower() or "innovacion" in nombre.lower() or "tic" in nombre.lower():
+                elif "innovaci" in nombre.lower() and "tic" in nombre.lower():
                     pre_esp = "Innovación en TIC"
                 else:
                     # Si no podemos determinar por nombre, intentar por código
-                    # ID3416-ID3419, ID3469 = IoN
-                    if clave in ["ID3416", "ID3417", "ID3418", "ID3419", "ID3469"]:
+                    # ID3420-ID3424 = Inteligencia Organizacional y de Negocios
+                    # ID3415-ID3419 = Innovación en TIC
+                    if clave in ["ID3420", "ID3421", "ID3422", "ID3423", "ID3424"]:
                         pre_esp = "Inteligencia Organizacional y de Negocios"
-                    else:
+                    elif clave in ["ID3415", "ID3416", "ID3417", "ID3418", "ID3419"]:
                         pre_esp = "Innovación en TIC"
+                    else:
+                        continue  # Skip si no podemos identificar
                 
                 # Guardar o actualizar el estatus más reciente (último periodo)
                 if clave not in materias_procesadas or periodo > materias_procesadas[clave]["periodo"]:
@@ -358,23 +475,21 @@ def main():
     creditos_acumulados = st.session_state.get("creditos_acumulados", datos.total_creditos)
     creditos_faltantes = max(0, creditos_totales - creditos_acumulados)
     
-    col1, col2, col3, col4 = st.columns(4)
+    # Mostrar métricas principales en una sola fila
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.metric("Matrícula", datos.matricula)
     with col2:
         st.metric("Plan de Estudios", datos.plan_estudios)
     with col3:
-        st.metric("Créditos Acumulados", f"{creditos_acumulados}/{creditos_totales}")
+        st.metric("Créditos", f"{creditos_acumulados}/{creditos_totales}",
+                 delta=f"-{creditos_faltantes} para graduarse" if creditos_faltantes > 0 else "Completado",
+                 delta_color="inverse")
     with col4:
         st.metric("Promedio General", f"{datos.promedio_general:.2f}")
-    
-    # Mostrar créditos faltantes en métrica destacada
-    col_cred1, col_cred2, col_cred3 = st.columns(3)
-    with col_cred2:
-        st.metric("⏳ Créditos Faltantes", creditos_faltantes, 
-                 delta=f"-{creditos_faltantes} para graduarse" if creditos_faltantes > 0 else "✅ Completado",
-                 delta_color="inverse")
+    with col5:
+        st.metric("Situación", datos.situacion)
     
     st.markdown("---")
     
@@ -424,29 +539,119 @@ def main():
         ciclos_validos = sorted(c for c in progreso_ciclos.keys() if 1 <= c <= 4)
         
         if ciclos_validos:
-            cols = st.columns(len(ciclos_validos))
-            for j, ciclo in enumerate(ciclos_validos):
-                progreso = progreso_ciclos[ciclo]
-                
-                with cols[j]:
-                    fig = crear_grafica_progreso_ciclo(ciclo, {
-                        "finalizadas": progreso.finalizadas,
-                        "en_curso": progreso.en_curso,
-                        "reprobadas": progreso.reprobadas
-                    })
-                    st.plotly_chart(fig, use_container_width=True)
-                    st.markdown(f"""
-                    <div class='metric-box'>
-                        <strong>{progreso.porcentaje:.1f}% Completado</strong><br>
-                        ✅ Finalizadas: {progreso.finalizadas}/{progreso.total}<br>
-                        ⏳ En Curso: {progreso.en_curso}/{progreso.total}<br>
-                        ❌ Reprobadas: {progreso.reprobadas}/{progreso.total}
-                    </div>
-                    """, unsafe_allow_html=True)
+            # Asegurar que siempre se muestren 4 columnas (ciclos 1-4)
+            cols = st.columns(4)
+            for ciclo in range(1, 5):
+                with cols[ciclo - 1]:
+                    if ciclo in progreso_ciclos:
+                        progreso = progreso_ciclos[ciclo]
+                        fig = crear_grafica_progreso_ciclo(ciclo, {
+                            "finalizadas": progreso.finalizadas,
+                            "en_curso": progreso.en_curso,
+                            "reprobadas": progreso.reprobadas
+                        })
+                        st.plotly_chart(fig, use_container_width=True)
+                        st.markdown(f"""
+                        <div class='metric-box'>
+                            <strong>{progreso.porcentaje:.1f}% Completado</strong><br>
+                            ✅ Finalizadas: {progreso.finalizadas}/{progreso.total}<br>
+                            ⏳ En Curso: {progreso.en_curso}/{progreso.total}<br>
+                            ❌ Reprobadas: {progreso.reprobadas}/{progreso.total}
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.info(f"Ciclo {ciclo}: Sin datos")
         else:
             st.info("No hay datos de progreso por ciclo.")
     except Exception as e:
         st.warning(f"Error al calcular progreso: {str(e)}")
+    
+    st.markdown("---")
+    
+    # ========== SECCIÓN 3.2: MATERIAS DE ELECCIÓN LIBRE ==========
+    st.header("📚 Materias de Elección Libre")
+    st.caption("Ciclo 1 y 2: 2 materias cada uno | Ciclos 3 y 4 combinados: 8 materias (incluye materias de pre-especialidad no usada)")
+    
+    try:
+        mapa_curricular = cargar_mapa_curricular()
+        eleccion_libre, pre_titulacion, pre_especialidades_count = calcular_eleccion_libre(historial_filtrado, mapa_curricular)
+        
+        # Mostrar en 3 columnas: Ciclo 1, Ciclo 2, Ciclos 3 y 4
+        col_el1, col_el2, col_el3 = st.columns(3)
+        
+        with col_el1:
+            st.subheader("📘 Ciclo 1")
+            el1 = eleccion_libre[1]
+            progreso_el1 = (el1["aprobadas"] / el1["requeridas"] * 100) if el1["requeridas"] > 0 else 0
+            # Limitar progreso entre 0 y 100% para la barra visual
+            st.progress(min(progreso_el1 / 100, 1.0))
+            st.markdown(f"""
+            <div class='metric-box'>
+                <strong>{progreso_el1:.0f}% Completado</strong><br>
+                ✅ Aprobadas: {el1["aprobadas"]}/{el1["requeridas"]}<br>
+                ⏳ En Curso: {el1["en_curso"]}<br>
+                📚 Faltan: {max(0, el1["requeridas"] - el1["aprobadas"])} materias
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_el2:
+            st.subheader("📗 Ciclo 2")
+            el2 = eleccion_libre[2]
+            progreso_el2 = (el2["aprobadas"] / el2["requeridas"] * 100) if el2["requeridas"] > 0 else 0
+            # Limitar progreso entre 0 y 100% para la barra visual
+            st.progress(min(progreso_el2 / 100, 1.0))
+            st.markdown(f"""
+            <div class='metric-box'>
+                <strong>{progreso_el2:.0f}% Completado</strong><br>
+                ✅ Aprobadas: {el2["aprobadas"]}/{el2["requeridas"]}<br>
+                ⏳ En Curso: {el2["en_curso"]}<br>
+                📚 Faltan: {max(0, el2["requeridas"] - el2["aprobadas"])} materias
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_el3:
+            st.subheader("📙 Ciclos 3 y 4")
+            el34 = eleccion_libre["3_y_4"]
+            progreso_el34 = (el34["aprobadas"] / el34["requeridas"] * 100) if el34["requeridas"] > 0 else 0
+            # Limitar progreso entre 0 y 100% para la barra visual
+            st.progress(min(progreso_el34 / 100, 1.0))
+            st.markdown(f"""
+            <div class='metric-box'>
+                <strong>{progreso_el34:.0f}% Completado</strong><br>
+                ✅ Aprobadas: {el34["aprobadas"]}/{el34["requeridas"]}<br>
+                ⏳ En Curso: {el34["en_curso"]}<br>
+                📚 Faltan: {max(0, el34["requeridas"] - el34["aprobadas"])} materias<br>
+                <em style="font-size: 0.85em;">Pre-especialidad de titulación: {pre_titulacion}</em>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Información adicional sobre materias potenciales de pre-especialidad
+        if pre_especialidades_count["IoN"] < 5 or pre_especialidades_count["ITIC"] < 5:
+            st.info("💡 **Consejo**: Materias de la pre-especialidad no completada pueden contar como elección libre en Ciclos 3 y 4")
+            with st.expander("Ver detalle de pre-especialidades y elección libre"):
+                col_info1, col_info2 = st.columns(2)
+                with col_info1:
+                    st.markdown("**Inteligencia Organizacional y de Negocios (IoN)**")
+                    st.markdown(f"✅ Aprobadas: {pre_especialidades_count['IoN']}/5")
+                    if pre_titulacion == "ITIC" and pre_especialidades_count['IoN'] > 0:
+                        st.success(f"Tienes {pre_especialidades_count['IoN']} materia(s) de IoN que cuentan como elección libre")
+                with col_info2:
+                    st.markdown("**Innovación en TIC (ITIC)**")
+                    st.markdown(f"✅ Aprobadas: {pre_especialidades_count['ITIC']}/5")
+                    if pre_titulacion == "IoN" and pre_especialidades_count['ITIC'] > 0:
+                        st.success(f"Tienes {pre_especialidades_count['ITIC']} materia(s) de ITIC que cuentan como elección libre")
+                
+                # Calcular cuántas más se necesitan de elección libre vs cuántas se podrían obtener de pre-especialidad
+                faltan_el = max(0, el34["requeridas"] - el34["aprobadas"])
+                pre_no_usada = "IoN" if pre_titulacion == "ITIC" else "ITIC"
+                materias_pre_no_usada = 5 - pre_especialidades_count[pre_no_usada]
+                if faltan_el > 0 and materias_pre_no_usada > 0:
+                    st.info(f"📊 Te faltan {faltan_el} materias de elección libre en Ciclos 3y4. Puedes tomar hasta {materias_pre_no_usada} materias de {pre_no_usada} que contarán como elección libre.")
+                    
+    except Exception as e:
+        st.warning(f"Error al calcular elección libre: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
     
     st.markdown("---")
     
