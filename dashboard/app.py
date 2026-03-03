@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from parsers import KardexParser
 from services import AcademicProcessor
-from services.local_database import LocalDatabaseService
+from services.supabase_service import SupabaseService
 from config import settings
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
@@ -411,7 +411,7 @@ def main():
                     datos = parser.parse_kardex(temp_path)
                     
                     # Guardar en BD local
-                    db = LocalDatabaseService()
+                    db = SupabaseService()
                     db.crear_estudiante(datos.matricula, {
                         "nombre": datos.nombre,
                         "plan_estudios": datos.plan_estudios,
@@ -490,6 +490,50 @@ def main():
         st.metric("Promedio General", f"{datos.promedio_general:.2f}")
     with col5:
         st.metric("Situación", datos.situacion)
+    
+    # ========== INDICADOR DE PROGRESO ==========
+    st.markdown("---")
+    st.subheader("📊 Progreso de la Carrera")
+    
+    # Calcular porcentaje de créditos
+    porcentaje_creditos = (creditos_acumulados / creditos_totales * 100) if creditos_totales > 0 else 0
+    
+    # Obtener ciclos cursados del historial
+    ciclos_cursados = sorted(set(historial_df['ciclo'].dropna().astype(int))) if 'ciclo' in historial_df.columns else []
+    ciclos_unicos = len(ciclos_cursados)
+    
+    # Calcular años desde agosto del año de entrada (extraído de la matrícula)
+    años_aprox = 0
+    try:
+        # Extraer año de entrada de los primeros 2 dígitos de la matrícula
+        # Ej: 220300709 → 22 → 2022
+        matricula_str = datos.matricula.strip()
+        if len(matricula_str) >= 2:
+            año_dos_digitos = int(matricula_str[:2])
+            # Convertir a año completo (20YY)
+            año_entrada = 2000 + año_dos_digitos
+            
+            # Calcular años desde agosto del año de entrada hasta hoy
+            from datetime import datetime
+            fecha_inicio = datetime(año_entrada, 8, 1)
+            fecha_hoy = datetime.now()
+            días_transcurridos = (fecha_hoy - fecha_inicio).days
+            años_aprox = round(días_transcurridos / 365.25, 1)
+            años_aprox = max(0, años_aprox)  # No permitir valores negativos
+    except Exception as e:
+        años_aprox = ciclos_unicos  # Fallback si hay error
+    
+    # Mostrar progreso visual
+    col_prog1, col_prog2 = st.columns([3, 1])
+    
+    with col_prog1:
+        st.progress(porcentaje_creditos / 100, text=f"{porcentaje_creditos:.1f}% de créditos completados")
+        st.caption(f"Créditos: {creditos_acumulados} de {creditos_totales} | Faltan: {creditos_faltantes}")
+    
+    with col_prog2:
+        st.metric("Años cursados", f"{años_aprox}", 
+                 f"Ciclos: {ciclos_unicos}",
+                 delta_color="off")
     
     st.markdown("---")
     
