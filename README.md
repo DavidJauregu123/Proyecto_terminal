@@ -159,6 +159,29 @@ Requisitos adicionales para graduación
 4. **Visualización**: Muestra reportes y alertas
 5. **Agente**: Consulta en lenguaje natural (próximo)
 
+## 📄 Tecnologías para Análisis de PDFs
+
+El sistema utiliza tres bibliotecas especializadas para extraer y analizar la información de los archivos PDF:
+
+| Biblioteca | Versión | Función |
+|------------|---------|---------|
+| **pdfplumber** | 0.10.3 | Extracción de texto e información estructurada (tablas, posiciones) de PDFs digitales con texto seleccionable. Es la herramienta principal usada en `KardexParser` e `HistorialParser`. |
+| **pdf2image** | 1.16.0 | Convierte páginas de un PDF en imágenes (formato PIL/Pillow). Se utiliza como paso previo al OCR cuando el PDF es un documento escaneado. |
+| **pytesseract** | 0.3.10 | Motor de Reconocimiento Óptico de Caracteres (OCR) que extrae texto a partir de imágenes. Se aplica sobre los PDFs escaneados convertidos con `pdf2image`. |
+
+### Flujo de extracción
+
+```
+PDF digital (texto seleccionable)
+    └──► pdfplumber → texto estructurado → parser (regex + pandas)
+
+PDF escaneado (imagen)
+    └──► pdf2image → imágenes por página → pytesseract (OCR) → texto → parser
+```
+
+> **Resumen**: Se usa **pdfplumber** como motor principal para PDFs digitales,
+> y la combinación **pdf2image + pytesseract** como respaldo para PDFs escaneados.
+
 ## 📊 Componentes Implementados
 
 - ✅ Parser de Kardex (pdfplumber)
