@@ -41,7 +41,7 @@ python scripts/init_local.py
 
 Este script:
 - Crea todas las tablas automáticamente
-- Carga las materias desde `data/mapa_curricular_ejemplo.json`
+- Carga las materias desde `data/mapa_curricular_2021ID_real.json`
 - Configura las relaciones entre tablas
 
 ### 2.2 Verificar Base de Datos (Opcional)

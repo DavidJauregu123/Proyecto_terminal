@@ -48,7 +48,9 @@ proyecto terminal/
 ├── agents/                 # Agentes LangGraph + Gemini
 │   └── __init__.py
 ├── data/                   # Datos estáticos
-│   └── mapa_curricular_ejemplo.json
+│   ├── mapa_curricular_2021ID_real.json
+│   ├── mapa_curricular_2021ID_real_completo.json
+│   └── equivalencias_legacy_2021ID.json
 ├── requirements.txt
 ├── .env.example
 └── README.md
@@ -158,6 +160,14 @@ Requisitos adicionales para graduación
 3. **Procesamiento**: Valida seriación y calcula progreso
 4. **Visualización**: Muestra reportes y alertas
 5. **Agente**: Consulta en lenguaje natural (próximo)
+
+## 🧠 Nota Importante de Fuente de Datos
+
+- El parser de PDF extrae `clave` y `nombre` directamente del documento (kardex/historial).
+- El mapa curricular se usa como referencia para ubicar ciclo, categoría y metadatos.
+- Fuente vigente del plan real 2021ID:
+	- `data/mapa_curricular_2021ID_real.json` (base)
+	- `data/mapa_curricular_2021ID_real_completo.json` (con requisitos migrados)
 
 ## 📊 Componentes Implementados
 

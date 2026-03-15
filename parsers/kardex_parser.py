@@ -118,14 +118,30 @@ class KardexParser:
         Extrae materias del texto plano del PDF.
         Formato: [*]CLAVE Nombre PERIODO OP# CALIFICACION CREDITOS
         También soporta: [*]CLAVE Nombre PERIODO OP# CREDITOS (sin calificación, en curso)
+
+        Regla importante del kardex actual:
+        - En la carga más reciente, valores N/A, N o NP con 0 créditos suelen
+            indicar materia inscrita sin cierre final del periodo.
+        - Si además hubo reprobación previa, después el dashboard la reclasifica
+            como RECURSANDO.
+        
+        REGLA CRÍTICA: 0 créditos = SIEMPRE EN_CURSO
+        (indica que el período no ha cerrado aún para esa materia)
         """
         materias = []
         # Clave: 2-4 letras + 4 dígitos (ej: DP0001, PID0201, IT0208)
         # Calificacion es opcional (ausente cuando la materia está en curso sin nota)
+        # El patrón es más flexible para capturar incluso líneas corruptas con basura al final
         patron = re.compile(
-            r'^\*?([A-Z]{2,4}\d{4})\s+(.+?)\s+(\d{6})\s+OP\d+\s+(\S+?)(?:\s+(\d+))?\s*$',
+            r'^\*?([A-Z]{2,4}\d{4})\s+(.+?)\s+(\d{6})\s+OP\d+\s+(\S+?)(?:\s+(\d+))?(?:\s+.*)?$',
             re.MULTILINE
         )
+        
+        # PRIMERO: Encontrar el ÚLTIMO PERÍODO
+        # Extraer todos los períodos encontrados en el texto
+        periodo_patron = re.compile(r'\d{6}')
+        periodos_encontrados = sorted(set(p for p in periodo_patron.findall(texto)))
+        ultimo_periodo = periodos_encontrados[-1] if periodos_encontrados else None
         
         for match in patron.finditer(texto):
             clave = match.group(1).strip()
@@ -134,60 +150,86 @@ class KardexParser:
             campo4 = match.group(4).strip()   # calificacion, o creditos si no hay grupo5
             campo5 = match.group(5)           # creditos (puede ser None)
             
-            # Determinar calificacion y creditos según campos disponibles
+            # PRIMERO: Determinar si campo4 es calificación o créditos
+            # Intenta convertir campo4 a int para saber si es créditos
+            campo4_es_numero = False
+            try:
+                int(campo4)
+                campo4_es_numero = True
+            except ValueError:
+                campo4_es_numero = False
+            
+            # Lógica de determinación de campos
             if campo5 is not None:
-                # Formato completo: OP# CALIFICACION CREDITOS
+                # Hay dos campos: campo4=calificación, campo5=créditos
                 calificacion_str = campo4
                 creditos_str = campo5
-            else:
-                # Solo un campo al final: es creditos, sin calificación (en curso)
+            elif campo4_es_numero:
+                # Solo un campo numérico: es créditos, sin calificación
                 calificacion_str = ""
                 creditos_str = campo4
-            
-            # Procesar calificación y estatus
-            calificacion = None
-            cal_upper = calificacion_str.upper()
-            
-            # S/A = Asignatura SÍ aprobada (sin calificación numérica)
-            if cal_upper == "S/A":
-                estatus = "APROBADA"
-                calificacion = None  # No tiene nota numérica
-            # N/A, N = Asignatura NO aprobada EXPLÍCITAMENTE
-            elif cal_upper in ("N/A", "N", "NP"):
-                estatus = "REPROBADA"
-                calificacion = 0.0
-            # Sin calificación o guiones = En curso o sin registrar
-            elif cal_upper in ("", "--", "S/G"):
-                estatus = "EN_CURSO"
-                calificacion = None
-            # Calificación numérica
             else:
-                try:
-                    calificacion = float(calificacion_str)
-                    # REGLA IMPORTANTE: calificación 0 o 0.0 = EN CURSO (no reprobada)
-                    if calificacion == 0.0 or calificacion == 0:
-                        estatus = "EN_CURSO"
-                        calificacion = None
-                    elif calificacion >= 6.0:
-                        estatus = "APROBADA"
-                    else:
-                        # Calificación entre 0 y 6 (pero no 0) = reprobada
-                        estatus = "REPROBADA"
-                except ValueError:
-                    # Si no se puede convertir a número, asumir en curso
-                    estatus = "EN_CURSO"
-                    calificacion = None
+                # Campo4 no es número (N/A, S/A, SÍG, etc): es calificación, sin créditos especificado
+                # Asumir 0 créditos para materias sin créditos formales (últimas cargas)
+                calificacion_str = campo4
+                creditos_str = "0"
             
-            # Materia con asterisco = reprobada (solo si tiene calificación < 6)
-            linea = match.group(0)
-            if linea.lstrip().startswith("*"):
-                if calificacion is not None and calificacion < 6.0:
-                    estatus = "REPROBADA"
-            
+            # PRIMERO: Extraer créditos (necesitamos esto antes de cualquier decisión de estatus)
             try:
                 creditos = int(creditos_str)
             except ValueError:
                 creditos = 0
+            
+            # REGLA CRÍTICA PARA ÚLTIMO PERÍODO: 
+            # Si es el ÚLTIMO período y creditos=0 → SIEMPRE EN_CURSO (sin importar calificación)
+            # Esto incluye: N/A, vacío, 0, etc. → EN_CURSO
+            if periodo == ultimo_periodo and creditos == 0:
+                estatus = "EN_CURSO"
+                calificacion = None
+            elif creditos == 0:
+                # Para períodos anteriores con creditos=0, también EN_CURSO
+                estatus = "EN_CURSO"
+                calificacion = None
+            else:
+                # Procesar calificación y estatus SOLO si creditos > 0
+                calificacion = None
+                cal_upper = calificacion_str.upper()
+                
+                # S/A = Asignatura SÍ aprobada (sin calificación numérica)
+                if cal_upper == "S/A":
+                    estatus = "APROBADA"
+                    calificacion = None  # No tiene nota numérica
+                # N/A, N, NP se ajustan después si pertenecen a la carga más reciente
+                elif cal_upper in ("N/A", "N", "NP"):
+                    estatus = "REPROBADA"
+                    calificacion = 0.0
+                # Sin calificación o guiones = En curso o sin registrar
+                elif cal_upper in ("", "--", "S/G"):
+                    estatus = "EN_CURSO"
+                    calificacion = None
+                # Calificación numérica
+                else:
+                    try:
+                        calificacion = float(calificacion_str)
+                        # REGLA IMPORTANTE: calificación 0 o 0.0 = EN CURSO (no reprobada)
+                        if calificacion == 0.0 or calificacion == 0:
+                            estatus = "EN_CURSO"
+                            calificacion = None
+                        elif calificacion >= 7.0:
+                            estatus = "APROBADA"
+                        else:
+                            # Calificación entre 0 y 7 (pero no 0) = reprobada
+                            estatus = "REPROBADA"
+                    except ValueError:
+                        # Si no se puede convertir a número, asumir en curso
+                        estatus = "EN_CURSO"
+                        calificacion = None
+                
+                # Materia con asterisco = reprobada (solo si tiene calificación < 7 Y creditos > 0)
+                linea = match.group(0)
+                if linea.lstrip().startswith("*"):
+                    if calificacion is not None and calificacion < 7.0 and creditos > 0:
+                        estatus = "REPROBADA"
             
             materias.append(MateriaRegistro(
                 clave=clave,

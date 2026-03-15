@@ -1,0 +1,236 @@
+{
+  "ID0001": {
+    "real_clave": "II0002",
+    "real_nombre": "Propedéutico de matemáticas para ingeniería",
+    "razones": [
+      "equivalencia_manual"
+    ]
+  },
+  "ID0102": {
+    "real_clave": "II0106",
+    "real_nombre": "Cálculo Diferencial",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0103": {
+    "real_clave": "ID0103",
+    "real_nombre": "Organización y diseño de computadoras",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0104": {
+    "real_clave": "ID0104",
+    "real_nombre": "Cálculo Integral",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0106": {
+    "real_clave": "DP0001",
+    "real_nombre": "Propedéutico de habilidades básicas de lectura, estudio e investigación",
+    "razones": [
+      "equivalencia_manual"
+    ]
+  },
+  "ID0202": {
+    "real_clave": "ID0207",
+    "real_nombre": "Probabilidad y Estadística",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0203": {
+    "real_clave": "II0322",
+    "real_nombre": "Álgebra Lineal",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0204": {
+    "real_clave": "IT0208",
+    "real_nombre": "Electrónica digital",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0205": {
+    "real_clave": "ID0107",
+    "real_nombre": "Diseño de patrones para datos estructurados",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0206": {
+    "real_clave": "ID0204",
+    "real_nombre": "Bases de datos",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0301": {
+    "real_clave": "IA0209",
+    "real_nombre": "Ecuaciones diferenciales",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0302": {
+    "real_clave": "IL0204",
+    "real_nombre": "Estadística analítica",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0303": {
+    "real_clave": "ID0108",
+    "real_nombre": "Física clásica",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0304": {
+    "real_clave": "IT3472",
+    "real_nombre": "Principios de automatización y robótica",
+    "razones": [
+      "match_nombre_exacto",
+      "equivalencia_manual"
+    ]
+  },
+  "ID0305": {
+    "real_clave": "ID0208",
+    "real_nombre": "Técnicas algorítmicas",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0306": {
+    "real_clave": "IT0210",
+    "real_nombre": "Programación orientada a objetos",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0401": {
+    "real_clave": "ID0310",
+    "real_nombre": "Minería de datos",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0402": {
+    "real_clave": "ID0309",
+    "real_nombre": "Aprendizaje estadístico",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0403": {
+    "real_clave": "ID0265",
+    "real_nombre": "Programación web",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0404": {
+    "real_clave": "ID0307",
+    "real_nombre": "Ingeniería de software",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0405": {
+    "real_clave": "ID0415",
+    "real_nombre": "Sistemas distribuidos",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0407": {
+    "real_clave": "DP0499",
+    "real_nombre": "Seminario de investigación",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0501": {
+    "real_clave": "ID0308",
+    "real_nombre": "Análisis de grandes volúmenes de datos",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0502": {
+    "real_clave": "ID3424",
+    "real_nombre": "Visualización de datos",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0504": {
+    "real_clave": "IT0317",
+    "real_nombre": "Diseño de Interfaces Humano-Máquina",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0505": {
+    "real_clave": "ID0411",
+    "real_nombre": "Cómputo de alto desempeño",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0506": {
+    "real_clave": "IT0425",
+    "real_nombre": "Introducción a la inteligencia artificial",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0601": {
+    "real_clave": "ID3420",
+    "real_nombre": "Analítica para la inteligencia de negocios",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0602": {
+    "real_clave": "ID0311",
+    "real_nombre": "Aprendizaje profundo",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0603": {
+    "real_clave": "ID0413",
+    "real_nombre": "Procesamiento de datos en la nube",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0604": {
+    "real_clave": "ID0412",
+    "real_nombre": "Métodos de desarrollo de software",
+    "razones": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0605": {
+    "real_clave": "ID3476",
+    "real_nombre": "Algoritmos bioinspirados",
+    "razones": [
+      "match_nombre_exacto",
+      "equivalencia_manual"
+    ]
+  },
+  "ID0701": {
+    "real_clave": "IT0427",
+    "real_nombre": "Proyecto terminal",
+    "razones": [
+      "match_nombre_exacto",
+      "equivalencia_manual"
+    ]
+  }
+}

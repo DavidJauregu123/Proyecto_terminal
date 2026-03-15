@@ -1,0 +1,354 @@
+{
+  "ID0001": {
+    "clave": "ID0001",
+    "nombre": "Propedéutico de Matemáticas",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "requisitos": []
+  },
+  "ID0101": {
+    "clave": "ID0101",
+    "nombre": "Matemáticas para la Ingeniería",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": []
+  },
+  "ID0102": {
+    "clave": "ID0102",
+    "nombre": "Cálculo Diferencial",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0001"]
+  },
+  "ID0103": {
+    "clave": "ID0103",
+    "nombre": "Organización y Diseño de Computadoras",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": []
+  },
+  "ID0104": {
+    "clave": "ID0104",
+    "nombre": "Cálculo Integral",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0102"]
+  },
+  "ID0105": {
+    "clave": "ID0105",
+    "nombre": "Algoritmos y Estructuras de Datos",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": []
+  },
+  "ID0106": {
+    "clave": "ID0106",
+    "nombre": "Propedéutico de Lectura, Estudio e Investigación",
+    "ciclo": 1,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "requisitos": []
+  },
+  "ID0107": {
+    "clave": "ID0107",
+    "nombre": "Ingles Nivel 1",
+    "ciclo": 1,
+    "categoria": "EXTRACURRICULAR",
+    "creditos": 3,
+    "requisitos": []
+  },
+  "ID0201": {
+    "clave": "ID0201",
+    "nombre": "Cálculo Vectorial",
+    "ciclo": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0104"]
+  },
+  "ID0202": {
+    "clave": "ID0202",
+    "nombre": "Probabilidad y Estadística",
+    "ciclo": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0104"]
+  },
+  "ID0203": {
+    "clave": "ID0203",
+    "nombre": "Álgebra Lineal",
+    "ciclo": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0102"]
+  },
+  "ID0204": {
+    "clave": "ID0204",
+    "nombre": "Electrónica Digital",
+    "ciclo": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0103"]
+  },
+  "ID0205": {
+    "clave": "ID0205",
+    "nombre": "Diseño de Patrones para Datos Estructurados",
+    "ciclo": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0105"]
+  },
+  "ID0206": {
+    "clave": "ID0206",
+    "nombre": "Bases de Datos",
+    "ciclo": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0105"]
+  },
+  "ID0207": {
+    "clave": "ID0207",
+    "nombre": "Ingles Nivel 2",
+    "ciclo": 2,
+    "categoria": "EXTRACURRICULAR",
+    "creditos": 3,
+    "requisitos": ["ID0107"]
+  },
+  "ID0301": {
+    "clave": "ID0301",
+    "nombre": "Ecuaciones Diferenciales",
+    "ciclo": 3,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0201"]
+  },
+  "ID0302": {
+    "clave": "ID0302",
+    "nombre": "Estadística Analítica",
+    "ciclo": 3,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0202"]
+  },
+  "ID0303": {
+    "clave": "ID0303",
+    "nombre": "Física Clásica",
+    "ciclo": 3,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0104"]
+  },
+  "ID0304": {
+    "clave": "ID0304",
+    "nombre": "Principios de Automatización y Robótica",
+    "ciclo": 3,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0204"]
+  },
+  "ID0305": {
+    "clave": "ID0305",
+    "nombre": "Técnicas Algorítmicas",
+    "ciclo": 3,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0205"]
+  },
+  "ID0306": {
+    "clave": "ID0306",
+    "nombre": "Programación Orientada a Objetos",
+    "ciclo": 3,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "requisitos": ["ID0305"]
+  },
+  "ID0307": {
+    "clave": "ID0307",
+    "nombre": "Ingles Nivel 3",
+    "ciclo": 3,
+    "categoria": "EXTRACURRICULAR",
+    "creditos": 3,
+    "requisitos": ["ID0207"]
+  },
+  "ID0401": {
+    "clave": "ID0401",
+    "nombre": "Minería de Datos",
+    "ciclo": 4,
+    "categoria": "PRE-ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0206", "ID0202"]
+  },
+  "ID0402": {
+    "clave": "ID0402",
+    "nombre": "Aprendizaje Estadístico",
+    "ciclo": 4,
+    "categoria": "PRE-ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0203", "ID0202"]
+  },
+  "ID0403": {
+    "clave": "ID0403",
+    "nombre": "Programación Web",
+    "ciclo": 4,
+    "categoria": "PRE-ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0306"]
+  },
+  "ID0404": {
+    "clave": "ID0404",
+    "nombre": "Ingeniería de Software",
+    "ciclo": 4,
+    "categoria": "PRE-ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0206", "ID0306"]
+  },
+  "ID0405": {
+    "clave": "ID0405",
+    "nombre": "Sistemas Distribuidos",
+    "ciclo": 4,
+    "categoria": "PRE-ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0306"]
+  },
+  "ID0406": {
+    "clave": "ID0406",
+    "nombre": "Ingles Nivel 4",
+    "ciclo": 4,
+    "categoria": "EXTRACURRICULAR",
+    "creditos": 3,
+    "requisitos": ["ID0307"]
+  },
+  "ID0407": {
+    "clave": "ID0407",
+    "nombre": "Seminario de Investigación",
+    "ciclo": 4,
+    "categoria": "CIERRE",
+    "creditos": 4,
+    "requisitos": []
+  },
+  "ID0501": {
+    "clave": "ID0501",
+    "nombre": "Análisis de Grandes Volúmenes de Datos (Big Data)",
+    "ciclo": 5,
+    "categoria": "ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0401"]
+  },
+  "ID0502": {
+    "clave": "ID0502",
+    "nombre": "Visualización de Datos",
+    "ciclo": 5,
+    "categoria": "ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0401"]
+  },
+  "ID0503": {
+    "clave": "ID0503",
+    "nombre": "Aprendizaje Automático (Machine Learning)",
+    "ciclo": 5,
+    "categoria": "ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0402"]
+  },
+  "ID0504": {
+    "clave": "ID0504",
+    "nombre": "Diseño de Interfaces Humano-Máquina",
+    "ciclo": 5,
+    "categoria": "ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0403"]
+  },
+  "ID0505": {
+    "clave": "ID0505",
+    "nombre": "Cómputo de Alto Desempeño",
+    "ciclo": 5,
+    "categoria": "ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0306"]
+  },
+  "ID0506": {
+    "clave": "ID0506",
+    "nombre": "Introducción a la Inteligencia Artificial",
+    "ciclo": 5,
+    "categoria": "ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0101"]
+  },
+  "ID0507": {
+    "clave": "ID0507",
+    "nombre": "Tópicos Selectos de Inglés I",
+    "ciclo": 5,
+    "categoria": "EXTRACURRICULAR",
+    "creditos": 3,
+    "requisitos": ["ID0406"]
+  },
+  "ID0601": {
+    "clave": "ID0601",
+    "nombre": "Analítica para la Inteligencia de Negocios",
+    "ciclo": 6,
+    "categoria": "ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0501"]
+  },
+  "ID0602": {
+    "clave": "ID0602",
+    "nombre": "Aprendizaje Profundo (Deep Learning)",
+    "ciclo": 6,
+    "categoria": "ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0503"]
+  },
+  "ID0603": {
+    "clave": "ID0603",
+    "nombre": "Procesamiento de Datos en la Nube",
+    "ciclo": 6,
+    "categoria": "ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0505"]
+  },
+  "ID0604": {
+    "clave": "ID0604",
+    "nombre": "Métodos de Desarrollo de Software",
+    "ciclo": 6,
+    "categoria": "ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0404"]
+  },
+  "ID0605": {
+    "clave": "ID0605",
+    "nombre": "Algoritmos Bioinspirados",
+    "ciclo": 6,
+    "categoria": "ESPECIALIDAD",
+    "creditos": 8,
+    "requisitos": ["ID0506"]
+  },
+  "ID0606": {
+    "clave": "ID0606",
+    "nombre": "Tópicos Selectos de Inglés II",
+    "ciclo": 6,
+    "categoria": "EXTRACURRICULAR",
+    "creditos": 3,
+    "requisitos": ["ID0507"]
+  },
+  "ID0701": {
+    "clave": "ID0701",
+    "nombre": "Proyecto Terminal",
+    "ciclo": 7,
+    "categoria": "CIERRE",
+    "creditos": 12,
+    "requisitos": ["ID0407"]
+  },
+  "ID0702": {
+    "clave": "ID0702",
+    "nombre": "Prácticas Profesionales",
+    "ciclo": 7,
+    "categoria": "CIERRE",
+    "creditos": 6,
+    "requisitos": ["ID0404"]
+  }
+}

@@ -47,8 +47,10 @@ def ejemplo_procesar_kardex():
     print(df.head())
     
     # 3. Cargar mapa curricular
+    # Nota: el parser extrae clave y nombre directamente del PDF;
+    # el mapa se usa como referencia para ciclo/categoría/procesamiento.
     print("\n[3] Cargando mapa curricular...")
-    mapa_path = Path(__file__).parent / "data" / "mapa_curricular_ejemplo.json"
+    mapa_path = Path(__file__).parent / "data" / "mapa_curricular_2021ID_real.json"
     with open(mapa_path, "r", encoding="utf-8") as f:
         mapa_curricular = json.load(f)
     print(f"✅ Mapa curricular cargado: {len(mapa_curricular)} materias")

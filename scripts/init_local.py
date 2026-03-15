@@ -18,7 +18,7 @@ def cargar_materias_iniciales():
     db = DatabaseService()
     
     # Cargar mapa curricular
-    mapa_path = Path(__file__).parent.parent / "data" / "mapa_curricular_ejemplo.json"
+    mapa_path = Path(__file__).parent.parent / "data" / "mapa_curricular_2021ID_real.json"
     
     if not mapa_path.exists():
         print(f"❌ Archivo no encontrado: {mapa_path}")

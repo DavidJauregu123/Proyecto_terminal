@@ -10,8 +10,9 @@ class ProgresoCiclo:
     finalizadas: int
     en_curso: int
     reprobadas: int
-    total: int
-    porcentaje: float
+    pendientes: int = 0
+    total: int = 0
+    porcentaje: float = 0.0
 
 
 class AcademicProcessor:
@@ -29,11 +30,14 @@ class AcademicProcessor:
     
     def calcular_progreso_por_ciclo(self, historial_df: pd.DataFrame) -> Dict[int, ProgresoCiclo]:
         """
-        Calcula el progreso académico por ciclo.
+        Calcula el progreso académico por ciclo incluyendo materias pendientes.
         Usa la columna 'ciclo' del DataFrame si existe,
         con fallback al mapa_curricular.
         """
         progreso_por_ciclo = {}
+        
+        # Obtener materias cursadas por el estudiante
+        materias_cursadas = set(historial_df["clave"].unique()) if "clave" in historial_df.columns else set()
         
         tiene_ciclo = "ciclo" in historial_df.columns
         
@@ -48,25 +52,38 @@ class AcademicProcessor:
                 continue
             
             if ciclo not in progreso_por_ciclo:
-                progreso_por_ciclo[ciclo] = {"finalizadas": 0, "en_curso": 0, "reprobadas": 0, "total": 0}
+                progreso_por_ciclo[ciclo] = {"finalizadas": 0, "en_curso": 0, "reprobadas": 0, "pendientes": 0, "total": 0}
             
             progreso_por_ciclo[ciclo]["total"] += 1
             estatus = row["estatus"]
             if estatus == "APROBADA":
                 progreso_por_ciclo[ciclo]["finalizadas"] += 1
-            elif estatus == "EN_CURSO":
+            elif estatus in ("EN_CURSO", "RECURSANDO"):
                 progreso_por_ciclo[ciclo]["en_curso"] += 1
             elif estatus == "REPROBADA":
                 progreso_por_ciclo[ciclo]["reprobadas"] += 1
         
+        # Contar materias pendientes por ciclo (del mapa curricular)
+        for ciclo in range(1, 5):
+            if ciclo not in progreso_por_ciclo:
+                progreso_por_ciclo[ciclo] = {"finalizadas": 0, "en_curso": 0, "reprobadas": 0, "pendientes": 0, "total": 0}
+            
+            # Materias que deberían estar en este ciclo
+            materias_del_ciclo = [m for m, info in self.mapa_curricular.items() if info.get("ciclo") == ciclo]
+            # Materias pendientes = que están en el ciclo pero no han sido cursadas
+            materias_no_cursadas = [m for m in materias_del_ciclo if m not in materias_cursadas]
+            progreso_por_ciclo[ciclo]["pendientes"] = len(materias_no_cursadas)
+            progreso_por_ciclo[ciclo]["total"] += len(materias_no_cursadas)
+        
         resultado = {}
         for ciclo, datos in progreso_por_ciclo.items():
-            porcentaje = (datos["finalizadas"] / datos["total"] * 100) if datos["total"] > 0 else 0
+            porcentaje = (datos["finalizadas"] / (datos["total"] - datos["pendientes"]) * 100) if (datos["total"] - datos["pendientes"]) > 0 else 0
             resultado[ciclo] = ProgresoCiclo(
                 ciclo=ciclo,
                 finalizadas=datos["finalizadas"],
                 en_curso=datos["en_curso"],
                 reprobadas=datos["reprobadas"],
+                pendientes=datos["pendientes"],
                 total=datos["total"],
                 porcentaje=round(porcentaje, 2)
             )

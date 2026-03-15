@@ -1,0 +1,1202 @@
+{
+  "DP0001": {
+    "clave": "DP0001",
+    "nombre": "Propedéutico de habilidades básicas de lectura, estudio e investigación",
+    "ciclo": 1,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0106"
+    ],
+    "equivalencia_origen": [
+      "equivalencia_manual"
+    ]
+  },
+  "DP0191": {
+    "clave": "DP0191",
+    "nombre": "Taller de integración grupal y competencias comunicativas",
+    "ciclo": 1,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "DP0193": {
+    "clave": "DP0193",
+    "nombre": "Taller de redacción profesional",
+    "ciclo": 2,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "DP0194": {
+    "clave": "DP0194",
+    "nombre": "Desarrollo de habilidades del pensamiento",
+    "ciclo": 1,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "DP0295": {
+    "clave": "DP0295",
+    "nombre": "Taller de formación en responsabilidad social y ambiental",
+    "ciclo": 3,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "DP0396": {
+    "clave": "DP0396",
+    "nombre": "Identidad y cultura",
+    "ciclo": 4,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "DP0497": {
+    "clave": "DP0497",
+    "nombre": "Problemas del mundo contemporáneo",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "M",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "DP0498": {
+    "clave": "DP0498",
+    "nombre": "Problemas de México",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "M",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "DP0499": {
+    "clave": "DP0499",
+    "nombre": "Seminario de investigación",
+    "ciclo": 7,
+    "ciclo_anual": 4,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0407"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "IA0209": {
+    "clave": "IA0209",
+    "nombre": "Ecuaciones diferenciales",
+    "ciclo": 4,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0301"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0103": {
+    "clave": "ID0103",
+    "nombre": "Organización y diseño de computadoras",
+    "ciclo": 1,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0103"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0104": {
+    "clave": "ID0104",
+    "nombre": "Cálculo Integral",
+    "ciclo": 3,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "T",
+    "requisitos": [
+      "II0106"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0104"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0105": {
+    "clave": "ID0105",
+    "nombre": "Algoritmos y estructura de datos",
+    "ciclo": 1,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID0106": {
+    "clave": "ID0106",
+    "nombre": "Matemáticas discretas",
+    "ciclo": 2,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID0107": {
+    "clave": "ID0107",
+    "nombre": "Diseño de patrones para datos estructurados",
+    "ciclo": 2,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0205"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0108": {
+    "clave": "ID0108",
+    "nombre": "Física clásica",
+    "ciclo": 2,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "ID0104"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0303"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0160": {
+    "clave": "ID0160",
+    "nombre": "Pensamiento crítico para ingeniería",
+    "ciclo": 1,
+    "ciclo_anual": 1,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID0161": {
+    "clave": "ID0161",
+    "nombre": "Recursos de comunicación para la era digital",
+    "ciclo": 2,
+    "ciclo_anual": 1,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID0204": {
+    "clave": "ID0204",
+    "nombre": "Bases de datos",
+    "ciclo": 3,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0206"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0205": {
+    "clave": "ID0205",
+    "nombre": "Geometría computacional",
+    "ciclo": 4,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID0207": {
+    "clave": "ID0207",
+    "nombre": "Probabilidad y Estadística",
+    "ciclo": 3,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "T",
+    "requisitos": [
+      "ID0104"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0202"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0208": {
+    "clave": "ID0208",
+    "nombre": "Técnicas algorítmicas",
+    "ciclo": 3,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "ID0107"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0305"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0262": {
+    "clave": "ID0262",
+    "nombre": "Contabilidad y costos para ingeniería",
+    "ciclo": 4,
+    "ciclo_anual": 2,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID0263": {
+    "clave": "ID0263",
+    "nombre": "Sistemas de planificación de recursos empresariales",
+    "ciclo": 1,
+    "ciclo_anual": 1,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID0264": {
+    "clave": "ID0264",
+    "nombre": "Innovación disruptiva",
+    "ciclo": 3,
+    "ciclo_anual": 2,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID0265": {
+    "clave": "ID0265",
+    "nombre": "Programación web",
+    "ciclo": 4,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "IT0210"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0403"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0307": {
+    "clave": "ID0307",
+    "nombre": "Ingeniería de software",
+    "ciclo": 6,
+    "ciclo_anual": 3,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "ID0204",
+      "IT0210"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0404"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0308": {
+    "clave": "ID0308",
+    "nombre": "Análisis de grandes volúmenes de datos",
+    "ciclo": 4,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "S",
+    "requisitos": [
+      "ID0310"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0501"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0309": {
+    "clave": "ID0309",
+    "nombre": "Aprendizaje estadístico",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "ID0207",
+      "II0322"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0402"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0310": {
+    "clave": "ID0310",
+    "nombre": "Minería de datos",
+    "ciclo": 6,
+    "ciclo_anual": 3,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "S",
+    "requisitos": [
+      "ID0204",
+      "ID0207"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0401"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0311": {
+    "clave": "ID0311",
+    "nombre": "Aprendizaje profundo",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0602"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0411": {
+    "clave": "ID0411",
+    "nombre": "Cómputo de alto desempeño",
+    "ciclo": 7,
+    "ciclo_anual": 4,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "S",
+    "requisitos": [
+      "IT0210"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0505"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0412": {
+    "clave": "ID0412",
+    "nombre": "Métodos de desarrollo de software",
+    "ciclo": 7,
+    "ciclo_anual": 4,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "S",
+    "requisitos": [
+      "ID0307"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0604"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0413": {
+    "clave": "ID0413",
+    "nombre": "Procesamiento de datos en la nube",
+    "ciclo": 7,
+    "ciclo_anual": 4,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "ID0411"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0603"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID0414": {
+    "clave": "ID0414",
+    "nombre": "Seguridad de datos",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID0415": {
+    "clave": "ID0415",
+    "nombre": "Sistemas distribuidos",
+    "ciclo": 7,
+    "ciclo_anual": 4,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "IT0210"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0405"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID3415": {
+    "clave": "ID3415",
+    "nombre": "Cómputo Ubicuo",
+    "ciclo": 7,
+    "ciclo_anual": 4,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3416": {
+    "clave": "ID3416",
+    "nombre": "Diseño multimedia",
+    "ciclo": 6,
+    "ciclo_anual": 3,
+    "categoria": "PREESPECIALIDAD",
+    "creditos": 6,
+    "bloque": "",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3417": {
+    "clave": "ID3417",
+    "nombre": "Diseño de juegos",
+    "ciclo": 7,
+    "ciclo_anual": 4,
+    "categoria": "PREESPECIALIDAD",
+    "creditos": 6,
+    "bloque": "",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3418": {
+    "clave": "ID3418",
+    "nombre": "TIC para la educación",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "PREESPECIALIDAD",
+    "creditos": 6,
+    "bloque": "",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3419": {
+    "clave": "ID3419",
+    "nombre": "TIC para la salud",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "PREESPECIALIDAD",
+    "creditos": 6,
+    "bloque": "",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3420": {
+    "clave": "ID3420",
+    "nombre": "Analítica para la inteligencia de negocios",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "PREESPECIALIDAD",
+    "creditos": 6,
+    "bloque": "",
+    "requisitos": [
+      "ID0308"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0601"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID3421": {
+    "clave": "ID3421",
+    "nombre": "Gestión del conocimiento",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "PREESPECIALIDAD",
+    "creditos": 6,
+    "bloque": "",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3422": {
+    "clave": "ID3422",
+    "nombre": "Negocios digitales",
+    "ciclo": 6,
+    "ciclo_anual": 3,
+    "categoria": "PREESPECIALIDAD",
+    "creditos": 6,
+    "bloque": "",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3423": {
+    "clave": "ID3423",
+    "nombre": "Sistema de apoyo a la toma de decisiones",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "PREESPECIALIDAD",
+    "creditos": 6,
+    "bloque": "",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3424": {
+    "clave": "ID3424",
+    "nombre": "Visualización de datos",
+    "ciclo": 7,
+    "ciclo_anual": 4,
+    "categoria": "PREESPECIALIDAD",
+    "creditos": 6,
+    "bloque": "",
+    "requisitos": [
+      "ID0310"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0502"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "ID3466": {
+    "clave": "ID3466",
+    "nombre": "Gobierno de datos y redes sociales",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3467": {
+    "clave": "ID3467",
+    "nombre": "Graficación por computadoras",
+    "ciclo": 6,
+    "ciclo_anual": 3,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3468": {
+    "clave": "ID3468",
+    "nombre": "Herramientas para la gestión de grandes volúmenes de datos",
+    "ciclo": 6,
+    "ciclo_anual": 3,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3469": {
+    "clave": "ID3469",
+    "nombre": "Internet de las cosas",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "PREESPECIALIDAD",
+    "creditos": 6,
+    "bloque": "",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3470": {
+    "clave": "ID3470",
+    "nombre": "Programación de aplicaciones de red",
+    "ciclo": 6,
+    "ciclo_anual": 3,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3471": {
+    "clave": "ID3471",
+    "nombre": "Realidad Virtual",
+    "ciclo": 7,
+    "ciclo_anual": 4,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3472": {
+    "clave": "ID3472",
+    "nombre": "Tópicos selectos en ingeniería de datos",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3473": {
+    "clave": "ID3473",
+    "nombre": "Tópicos selectos en Inteligencia Organizacional",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3474": {
+    "clave": "ID3474",
+    "nombre": "Sistemas de información geográfica",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3475": {
+    "clave": "ID3475",
+    "nombre": "Programación de dispositivos móviles",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "M",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3476": {
+    "clave": "ID3476",
+    "nombre": "Algoritmos bioinspirados",
+    "ciclo": 6,
+    "ciclo_anual": 3,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "IT0425"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0605"
+    ],
+    "equivalencia_origen": [
+      "equivalencia_manual",
+      "match_nombre_exacto"
+    ]
+  },
+  "ID3477": {
+    "clave": "ID3477",
+    "nombre": "Tópicos selectos en tecnologías exponenciales",
+    "ciclo": 7,
+    "ciclo_anual": 4,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "ID3478": {
+    "clave": "ID3478",
+    "nombre": "Taller de herramientas para ciencia de datos",
+    "ciclo": 6,
+    "ciclo_anual": 3,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "II0002": {
+    "clave": "II0002",
+    "nombre": "Propedéutico de matemáticas para ingeniería",
+    "ciclo": 1,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0001"
+    ],
+    "equivalencia_origen": [
+      "equivalencia_manual"
+    ]
+  },
+  "II0106": {
+    "clave": "II0106",
+    "nombre": "Cálculo Diferencial",
+    "ciclo": 2,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "M",
+    "requisitos": [
+      "II0002"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0102"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "II0322": {
+    "clave": "II0322",
+    "nombre": "Álgebra Lineal",
+    "ciclo": 3,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "M",
+    "requisitos": [
+      "II0106"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0203"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "II0422": {
+    "clave": "II0422",
+    "nombre": "Taller de emprendedores",
+    "ciclo": 7,
+    "ciclo_anual": 4,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "IL0204": {
+    "clave": "IL0204",
+    "nombre": "Estadística analítica",
+    "ciclo": 4,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "S",
+    "requisitos": [
+      "ID0207"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0302"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "IL0414": {
+    "clave": "IL0414",
+    "nombre": "Taller de argumentación y técnicas de negociación",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "IL3422": {
+    "clave": "IL3422",
+    "nombre": "Liderazgo y equipos de trabajo",
+    "ciclo": 3,
+    "ciclo_anual": 2,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "IT0161": {
+    "clave": "IT0161",
+    "nombre": "Sistemas operativos POSIX",
+    "ciclo": 2,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "IT0208": {
+    "clave": "IT0208",
+    "nombre": "Electrónica digital",
+    "ciclo": 6,
+    "ciclo_anual": 3,
+    "categoria": "BASICA",
+    "creditos": 8,
+    "bloque": "T",
+    "requisitos": [
+      "ID0103"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0204"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "IT0210": {
+    "clave": "IT0210",
+    "nombre": "Programación orientada a objetos",
+    "ciclo": 3,
+    "ciclo_anual": 2,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "ID0208"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0306"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "IT0263": {
+    "clave": "IT0263",
+    "nombre": "Electrónica analógica",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "IT0264": {
+    "clave": "IT0264",
+    "nombre": "Introducción a los sistemas de información",
+    "ciclo": 2,
+    "ciclo_anual": 1,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "M",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "IT0317": {
+    "clave": "IT0317",
+    "nombre": "Diseño de Interfaces Humano-Máquina",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "ID0265"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0504"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "IT0423": {
+    "clave": "IT0423",
+    "nombre": "Administración de proyectos de desarrollo de software",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "IT0425": {
+    "clave": "IT0425",
+    "nombre": "Introducción a la inteligencia artificial",
+    "ciclo": 5,
+    "ciclo_anual": 3,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0506"
+    ],
+    "equivalencia_origen": [
+      "match_nombre_exacto"
+    ]
+  },
+  "IT0427": {
+    "clave": "IT0427",
+    "nombre": "Proyecto terminal",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "BASICA",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "DP0499"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0701"
+    ],
+    "equivalencia_origen": [
+      "equivalencia_manual",
+      "match_nombre_exacto"
+    ]
+  },
+  "IT3472": {
+    "clave": "IT3472",
+    "nombre": "Principios de automatización y robótica",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "S",
+    "requisitos": [
+      "IT0208"
+    ],
+    "origen": "excel_oficial",
+    "legacy_claves": [
+      "ID0304"
+    ],
+    "equivalencia_origen": [
+      "equivalencia_manual",
+      "match_nombre_exacto"
+    ]
+  },
+  "NI0423": {
+    "clave": "NI0423",
+    "nombre": "Planeación estratégica",
+    "ciclo": 4,
+    "ciclo_anual": 2,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "T",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  },
+  "NI3431": {
+    "clave": "NI3431",
+    "nombre": "Marketing en los negocios electrónicos",
+    "ciclo": 8,
+    "ciclo_anual": 4,
+    "categoria": "ELECCION_LIBRE",
+    "creditos": 6,
+    "bloque": "M",
+    "requisitos": [],
+    "origen": "excel_oficial",
+    "legacy_claves": [],
+    "equivalencia_origen": []
+  }
+}

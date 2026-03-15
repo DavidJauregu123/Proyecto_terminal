@@ -3,37 +3,37 @@
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 10.0
+    "calificacion": 7.0
   },
   "DP0191": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 8.0
+    "calificacion": 7.0
   },
   "DP0193": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "DP0194": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "ID0103": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 9.0
+    "calificacion": 7.0
   },
   "ID0104": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 7.0
+    "calificacion": null
   },
   "ID0105": {
     "ciclo": 1,
@@ -45,55 +45,55 @@
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "ID0107": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 10.0
+    "calificacion": null
   },
   "ID0108": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 7.0
+    "calificacion": null
   },
   "II0002": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 7.0
+    "calificacion": null
   },
   "II0106": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 7.0
+    "calificacion": null
   },
   "IT0161": {
     "ciclo": 1,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "ID0160": {
     "ciclo": 1,
     "categoria": "ELECCIÓN LIBRE",
     "creditos": 6,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "ID0161": {
     "ciclo": 1,
     "categoria": "ELECCIÓN LIBRE",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "ID0263": {
     "ciclo": 1,
     "categoria": "ELECCIÓN LIBRE",
     "creditos": 6,
-    "calificacion": null
+    "calificacion": 7.0
   },
   "IT0264": {
     "ciclo": 1,
@@ -105,79 +105,79 @@
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 10.0
+    "calificacion": 7.0
   },
   "DP0396": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": 7.0
   },
   "IA0209": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "ID0204": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "ID0205": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "ID0207": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 7.0
+    "calificacion": null
   },
   "ID0208": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "ID0265": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "ID0308": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "II0322": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "IL0204": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "IT0210": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "PID0201": {
     "ciclo": 2,
     "categoria": "BÁSICA",
     "creditos": 10,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "ID0262": {
     "ciclo": 2,
@@ -189,7 +189,7 @@
     "ciclo": 2,
     "categoria": "ELECCIÓN LIBRE",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "IL3422": {
     "ciclo": 2,
@@ -201,31 +201,31 @@
     "ciclo": 2,
     "categoria": "ELECCIÓN LIBRE",
     "creditos": 6,
-    "calificacion": 10.0
+    "calificacion": null
   },
   "DP0497": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 10.0
+    "calificacion": null
   },
   "DP0498": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "ID0307": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "ID0309": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 7.0
+    "calificacion": null
   },
   "ID0310": {
     "ciclo": 3,
@@ -237,31 +237,31 @@
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 10.0
+    "calificacion": null
   },
   "ID3470": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 10.0
+    "calificacion": null
   },
   "IT0208": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "IT0263": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 7.0
+    "calificacion": null
   },
   "IT0425": {
     "ciclo": 3,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "PID0302": {
     "ciclo": 3,
@@ -273,13 +273,13 @@
     "ciclo": 4,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 10.0
+    "calificacion": null
   },
   "ID0411": {
     "ciclo": 4,
     "categoria": "BÁSICA",
     "creditos": 8,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "ID0412": {
     "ciclo": 4,
@@ -291,7 +291,7 @@
     "ciclo": 4,
     "categoria": "BÁSICA",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "ID0414": {
     "ciclo": 4,
@@ -381,7 +381,7 @@
     "ciclo": 3,
     "categoria": "ELECCIÓN LIBRE",
     "creditos": 6,
-    "calificacion": 8.0
+    "calificacion": null
   },
   "ID3476": {
     "ciclo": 3,
@@ -513,7 +513,7 @@
     "ciclo": 3,
     "categoria": "PRE-ESPECIALIDAD",
     "creditos": 6,
-    "calificacion": 9.0
+    "calificacion": null
   },
   "ID3422": {
     "ciclo": 3,
@@ -531,15 +531,9 @@
     "ciclo": 3,
     "categoria": "PRE-ESPECIALIDAD",
     "creditos": 6,
-    "calificacion": 9.0
-  },
-  "AD0003": {
-    "ciclo": 0,
-    "categoria": "CO-CURRICULAR",
-    "creditos": 0,
     "calificacion": null
   },
-  "TA0023": {
+  "AD0003": {
     "ciclo": 0,
     "categoria": "CO-CURRICULAR",
     "creditos": 0,
