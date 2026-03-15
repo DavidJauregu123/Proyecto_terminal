@@ -30,3 +30,4 @@ Presiona Ctrl + C en la terminal
 - Si hay error de PostgreSQL, verifica que el servicio esté activo
 
 ═══════════════════════════════════════════════════════════════
+pip install -r requirements.txt

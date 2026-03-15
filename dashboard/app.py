@@ -10,9 +10,9 @@ import os
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from parsers import KardexParser
+from parsers import KardexParser, HistorialParser
 from services import AcademicProcessor
-from services.supabase_service import SupabaseService
+from services.local_database import DatabaseService
 from agents.sistema_experto_seriacion import ejecutar_sistema_experto
 from config import settings
 
@@ -128,7 +128,12 @@ def crear_grafica_progreso_ciclo(ciclo: int, progreso: dict) -> go.Figure:
         labels.append("En Curso")
         values.append(progreso.get("en_curso", 0))
         colores.append("#ffc107")
-    
+
+    if progreso.get("recursando", 0) > 0:
+        labels.append("Recursando")
+        values.append(progreso.get("recursando", 0))
+        colores.append("#ff8c00")
+
     if progreso.get("reprobadas", 0) > 0:
         labels.append("Reprobadas")
         values.append(progreso.get("reprobadas", 0))
@@ -159,24 +164,36 @@ def filtrar_ultimo_estatus(historial_df: pd.DataFrame) -> pd.DataFrame:
     """
     Filtra el historial para quedarse solo con el último registro de cada materia.
     Si una materia fue reprobada y luego aprobada, solo mantiene el registro aprobado.
+    REGLA: Si algún registro de una materia es APROBADA, siempre se prioriza ese.
     """
     if historial_df.empty:
         return historial_df
-    
+
     # Asegurar que periodo existe y convertir a string para ordenar
     if "periodo" not in historial_df.columns:
         return historial_df
-    
-    # Ordenar por periodo descendente (más reciente primero)
-    df_ordenado = historial_df.sort_values("periodo", ascending=False, na_position='last')
-    
-    # Quedarse con el primer registro de cada clave (el más reciente)
+
+    # Crear columna de prioridad: APROBADA tiene máxima prioridad
+    df = historial_df.copy()
+    df["_prioridad_aprobada"] = (df["estatus"] == "APROBADA").astype(int)
+
+    # Ordenar: primero por prioridad APROBADA (desc), luego por periodo (desc)
+    df_ordenado = df.sort_values(
+        ["_prioridad_aprobada", "periodo"],
+        ascending=[False, False],
+        na_position='last'
+    )
+
+    # Quedarse con el primer registro de cada clave (APROBADA si existe, sino más reciente)
     df_ultimo = df_ordenado.drop_duplicates(subset=["clave"], keep="first")
-    
+
+    # Limpiar columna auxiliar
+    df_ultimo = df_ultimo.drop(columns=["_prioridad_aprobada"])
+
     # Reordenar por ciclo y clave para mantener orden lógico
     if "ciclo" in df_ultimo.columns:
         df_ultimo = df_ultimo.sort_values(["ciclo", "clave"], na_position='last')
-    
+
     return df_ultimo
 
 
@@ -458,6 +475,68 @@ def calcular_progreso_preespecialidades(historial_df: pd.DataFrame, mapa_curricu
     return preespecialidades
 
 
+def combinar_historial_y_kardex(
+    historial_df: pd.DataFrame,
+    kardex_df: pd.DataFrame,
+    aprobadas_historial: set,
+) -> pd.DataFrame:
+    """
+    Combina los datos del historial académico (fuente de verdad para APROBADAS)
+    con los datos del kardex (detalle de periodos, intentos, EN_CURSO, REPROBADA).
+
+    Reglas:
+    - Si el historial dice APROBADA → se mantiene APROBADA sin importar el kardex.
+    - Del kardex se toman: periodos, intentos, EN_CURSO, REPROBADA para materias
+      que NO están aprobadas en el historial.
+    - Materias que están en el historial pero NO en el kardex se agregan como
+      APROBADA (si tienen calificación) o PENDIENTE.
+    """
+    if kardex_df.empty:
+        return historial_df.copy()
+
+    # Empezar con los registros del kardex (tienen periodos e intentos)
+    merged = kardex_df.copy()
+
+    # REGLA PRINCIPAL: Forzar APROBADA para materias aprobadas según historial
+    mask_aprobada = merged["clave"].isin(aprobadas_historial)
+    # Solo forzar si el kardex NO la tiene ya como APROBADA (evitar perder datos)
+    mask_no_aprobada_kardex = merged["estatus"] != "APROBADA"
+    mask_forzar = mask_aprobada & mask_no_aprobada_kardex
+
+    # Para materias que el historial dice APROBADA pero el kardex dice otra cosa:
+    # Buscar si hay algún registro APROBADA en el kardex para esa clave
+    claves_ya_aprobadas_kardex = set(
+        merged.loc[merged["estatus"] == "APROBADA", "clave"].unique()
+    )
+    # Solo forzar las que no tienen ningún registro APROBADA en el kardex
+    mask_forzar = mask_forzar & ~merged["clave"].isin(claves_ya_aprobadas_kardex)
+
+    if mask_forzar.any():
+        # Tomar el registro más reciente de cada clave y marcarlo como APROBADA
+        for clave in merged.loc[mask_forzar, "clave"].unique():
+            idx_clave = merged[merged["clave"] == clave].index
+            # Tomar el último registro (periodo más reciente)
+            ultimo_idx = idx_clave[-1]
+            merged.loc[ultimo_idx, "estatus"] = "APROBADA"
+
+    # Agregar materias del historial que NO están en el kardex
+    claves_kardex = set(merged["clave"].unique())
+    for _, row in historial_df.iterrows():
+        clave = row.get("clave", "")
+        if clave not in claves_kardex and row.get("estatus") == "APROBADA":
+            merged = pd.concat([merged, pd.DataFrame([{
+                "clave": clave,
+                "nombre": row.get("nombre", ""),
+                "periodo": "",
+                "ciclo": row.get("ciclo", 0),
+                "calificacion": row.get("calificacion"),
+                "creditos": row.get("creditos", 0),
+                "estatus": "APROBADA",
+            }])], ignore_index=True)
+
+    return merged
+
+
 def obtener_periodos_oferta(plan_estudios: str = "2021ID") -> list:
     """Obtiene periodos disponibles de oferta académica para un plan."""
     ruta_oferta = Path(__file__).parent.parent / "agents" / "OfertaAcademica"
@@ -511,25 +590,18 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuración")
 
-        # Subir PDF
-        pdf_file = st.file_uploader(
-            "Cargar Kardex (PDF)",
-            type="pdf",
-            help="Selecciona el archivo PDF del kardex del estudiante"
-        )
-
-        st.markdown("---")
-
-        # Subir Historial Académico para enriquecer el mapa curricular
+        # ── PASO 1: Subir Historial Académico (PRIMERO) ──
+        st.subheader("📄 Paso 1: Historial Académico")
+        st.caption("Sube primero el historial académico. Es la fuente de verdad para materias aprobadas.")
         historial_file = st.file_uploader(
             "Cargar Historial Académico (PDF)",
             type="pdf",
             key="historial_uploader",
-            help="Sube el historial académico oficial para actualizar el mapa curricular (ciclos y créditos)"
+            help="El historial académico oficial contiene todas las materias aprobadas, ciclos y categorías"
         )
 
         if historial_file is not None:
-            if st.button("🗂️ Actualizar Mapa Curricular", use_container_width=True):
+            if st.button("🗂️ Procesar Historial Académico", use_container_width=True):
                 try:
                     with st.spinner("Procesando historial académico..."):
                         with open("temp_historial.pdf", "wb") as f:
@@ -538,33 +610,69 @@ def main():
                         # Generar mapa curricular
                         mapa = generar_mapa("temp_historial.pdf")
 
-                        # Extraer créditos del historial
-                        from parsers.historial_parser import HistorialParser
+                        # Parsear historial para extraer materias con estatus
                         historial_parser = HistorialParser()
                         historial_parser.parse_historial("temp_historial.pdf")
 
                         if os.path.exists("temp_historial.pdf"):
                             os.remove("temp_historial.pdf")
 
-                        # Guardar en disco y en session_state
+                        # Guardar mapa en disco y session_state
                         mapa_path = Path(__file__).parent.parent / "data" / "mapa_curricular_2021ID.json"
                         mapa_path.parent.mkdir(exist_ok=True)
                         with open(mapa_path, "w", encoding="utf-8") as f:
                             json.dump(mapa, f, ensure_ascii=False, indent=2)
+
                         st.session_state.mapa_curricular = mapa
                         st.session_state.creditos_totales = historial_parser.creditos_totales
                         st.session_state.creditos_acumulados = historial_parser.creditos_acumulados
 
-                    st.success(f"✅ Mapa actualizado: {len(mapa)} materias cargadas")
+                        # Guardar materias aprobadas y DataFrame del historial
+                        aprobadas = historial_parser.obtener_aprobadas()
+                        historial_ac_df = historial_parser.to_dataframe()
+                        st.session_state.aprobadas_historial = aprobadas
+                        st.session_state.historial_academico_df = historial_ac_df
+
+                        # Guardar nivel de inglés
+                        st.session_state.codigos_ingles_aprobados = historial_parser.codigos_ingles_aprobados
+                        st.session_state.nivel_ingles_texto = historial_parser.nivel_ingles_texto
+                        st.session_state.ingles_completo = historial_parser.ingles_completo
+
+                        n_aprobadas = len(aprobadas)
+                        n_total = len(historial_parser.materias)
+
+                    st.success(f"✅ Historial procesado: {n_total} materias, {n_aprobadas} aprobadas")
                     st.info(f"📊 Créditos: {historial_parser.creditos_acumulados}/{historial_parser.creditos_totales}")
+                    if historial_parser.nivel_ingles_texto:
+                        st.info(f"🇬🇧 Inglés aprobado: {historial_parser.nivel_ingles_texto} ({len(historial_parser.codigos_ingles_aprobados)} niveles auto-aprobados)")
                 except Exception as e:
                     import traceback
                     st.error(f"❌ Error al procesar historial: {str(e)}")
                     st.code(traceback.format_exc())
-        elif "mapa_curricular" in st.session_state:
-            st.caption(f"🗂️ Mapa activo: {len(st.session_state.mapa_curricular)} materias")
+
+        # Mostrar estado del historial
+        if "aprobadas_historial" in st.session_state:
+            n_apr = len(st.session_state.aprobadas_historial)
+            st.caption(f"✅ Historial cargado: {n_apr} materias aprobadas")
+        else:
+            st.warning("⚠️ Sube el historial académico primero")
+
+        st.markdown("---")
+
+        # ── PASO 2: Subir Kardex (DESPUÉS) ──
+        st.subheader("📄 Paso 2: Kardex")
+        st.caption("El kardex agrega detalle de periodos, intentos y materias en curso.")
+
+        pdf_file = st.file_uploader(
+            "Cargar Kardex (PDF)",
+            type="pdf",
+            help="Selecciona el archivo PDF del kardex del estudiante"
+        )
 
         if pdf_file is not None:
+            if "aprobadas_historial" not in st.session_state:
+                st.warning("⚠️ Se recomienda subir el historial académico antes del kardex para mejores resultados.")
+
             try:
                 with st.spinner("Procesando kardex..."):
                     # Guardar archivo temporal
@@ -572,12 +680,13 @@ def main():
                         f.write(pdf_file.getvalue())
                     temp_path = "temp_kardex.pdf"
 
-                    # Parsear
+                    # Parsear kardex
                     parser = KardexParser()
                     datos = parser.parse_kardex(temp_path)
+                    kardex_df = parser.to_dataframe()
 
                     # Guardar en BD local
-                    db = SupabaseService()
+                    db = DatabaseService()
                     db.crear_estudiante(datos.matricula, {
                         "nombre": datos.nombre,
                         "plan_estudios": datos.plan_estudios,
@@ -586,7 +695,6 @@ def main():
                         "promedio_general": datos.promedio_general
                     })
 
-                    # Guardar historial
                     db.crear_registro_historial(
                         datos.matricula,
                         [
@@ -603,15 +711,27 @@ def main():
                         ]
                     )
 
+                    # MERGE: Combinar con historial académico si está disponible
+                    aprobadas_hist = st.session_state.get("aprobadas_historial", set())
+                    historial_ac_df = st.session_state.get("historial_academico_df", pd.DataFrame())
+
+                    if aprobadas_hist:
+                        historial_combinado = combinar_historial_y_kardex(
+                            historial_ac_df, kardex_df, aprobadas_hist
+                        )
+                    else:
+                        historial_combinado = kardex_df
+
                     st.session_state.datos_estudiante = datos
-                    st.session_state.historial_df = parser.to_dataframe()
+                    st.session_state.historial_df = historial_combinado
 
                     # Limpiar archivo temporal
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
 
-                    st.success("✅ Kardex procesado y guardado correctamente")
-                    st.info(f"📚 {len(datos.materias)} materias registradas en la BD local")
+                    n_aprobadas_final = (historial_combinado["estatus"] == "APROBADA").sum()
+                    st.success("✅ Kardex procesado y combinado con historial")
+                    st.info(f"📚 {len(historial_combinado)} registros | {n_aprobadas_final} materias aprobadas")
             except Exception as e:
                 import traceback
                 st.error(f"❌ Error al procesar PDF: {str(e)}")
@@ -619,7 +739,7 @@ def main():
 
     # Verificar si hay datos
     if "datos_estudiante" not in st.session_state:
-        st.info("👆 Carga un archivo PDF de kardex para comenzar")
+        st.info("👆 Carga primero el **Historial Académico** y luego el **Kardex** en el panel lateral para comenzar")
         return
 
     datos = st.session_state.datos_estudiante
@@ -953,19 +1073,23 @@ def main():
                             fig = crear_grafica_progreso_ciclo(ciclo, {
                                 "finalizadas": progreso.finalizadas,
                                 "en_curso": progreso.en_curso,
+                                "recursando": progreso.recursando,
                                 "reprobadas": progreso.reprobadas,
                                 "pendientes": progreso.pendientes
                             })
                             st.plotly_chart(fig, use_container_width=True)
-                            st.markdown(f"""
-                            <div class='metric-box'>
-                                <strong>{progreso.porcentaje:.1f}% Completado</strong><br>
-                                ✅ Finalizadas: {progreso.finalizadas}/{progreso.total - progreso.pendientes}<br>
-                                ⏳ En Curso: {progreso.en_curso}/{progreso.total - progreso.pendientes}<br>
-                                ❌ Reprobadas: {progreso.reprobadas}/{progreso.total - progreso.pendientes}<br>
-                                ⚪ Pendientes: {progreso.pendientes}
-                            </div>
-                            """, unsafe_allow_html=True)
+                            cursadas = progreso.total - progreso.pendientes
+                            lineas = [
+                                f"<strong>{progreso.porcentaje:.1f}% Completado</strong>",
+                                f"✅ Finalizadas: {progreso.finalizadas}/{cursadas}",
+                                f"⏳ En Curso: {progreso.en_curso}/{cursadas}",
+                            ]
+                            if progreso.recursando > 0:
+                                lineas.append(f"🟠 Recursando: {progreso.recursando}/{cursadas}")
+                            lineas.append(f"❌ Reprobadas: {progreso.reprobadas}/{cursadas}")
+                            lineas.append(f"⚪ Pendientes: {progreso.pendientes}")
+                            contenido = "<br>".join(lineas)
+                            st.markdown(f"<div class='metric-box'>{contenido}</div>", unsafe_allow_html=True)
                         else:
                             st.info(f"Ciclo {ciclo}: Sin datos")
             else:
@@ -1115,7 +1239,8 @@ def main():
         st.subheader("📋 Requisitos Adicionales")
 
         try:
-            requisitos = processor.calcular_requisitos(historial_filtrado)
+            ingles_ok = st.session_state.get("ingles_completo", False)
+            requisitos = processor.calcular_requisitos(historial_filtrado, ingles_completo=ingles_ok)
         except Exception:
             requisitos = {"Actividad Deportiva": False, "Actividad Cultural": False, "Inglés": False}
 
@@ -1127,6 +1252,79 @@ def main():
             st.markdown(f"**{iconos[requisitos.get('Actividad Cultural', False)]} Actividad Cultural**")
         with col3:
             st.markdown(f"**{iconos[requisitos.get('Inglés', False)]} Inglés**")
+
+        # ── Detalle de progreso de Inglés ──
+        st.markdown("---")
+        st.subheader("🇬🇧 Progreso de Inglés")
+
+        # Cadena completa de inglés para mostrar progreso
+        cadena_ingles_display = [
+            {"nivel": 1, "nombre": "Nivel 1 Inglés", "codigos": ["ID0107", "LI1101"]},
+            {"nivel": 2, "nombre": "Nivel 2 Inglés", "codigos": ["ID0207", "LI1102"]},
+            {"nivel": 3, "nombre": "Nivel 3 Inglés", "codigos": ["ID0307", "LI1103"]},
+            {"nivel": 4, "nombre": "Nivel 4 Inglés", "codigos": ["ID0406"]},
+            {"nivel": 5, "nombre": "Tópicos Selectos I", "codigos": ["ID0507"]},
+            {"nivel": 6, "nombre": "Tópicos Selectos II", "codigos": ["ID0606"]},
+        ]
+
+        nivel_historial = st.session_state.get("nivel_ingles_texto", "")
+        nivel_num = 0
+        # Obtener nivel numérico del historial
+        from parsers.historial_parser import HistorialParser as _HP
+        for entry in _HP.CADENA_INGLES:
+            for nombre_n in entry["nombres"]:
+                if nivel_historial and nombre_n in nivel_historial.lower().replace("inglés", "").replace("ingles", "").strip():
+                    nivel_num = max(nivel_num, entry["nivel"])
+
+        # Buscar estado de cada nivel en el kardex
+        ingles_rows = []
+        for nivel_info in cadena_ingles_display:
+            # Buscar en historial filtrado si alguno de los códigos existe
+            estatus_nivel = "PENDIENTE"
+            clave_encontrada = ""
+            for codigo in nivel_info["codigos"]:
+                mask = historial_filtrado["clave"] == codigo
+                if mask.any():
+                    row = historial_filtrado[mask].iloc[0]
+                    estatus_nivel = row["estatus"]
+                    clave_encontrada = codigo
+                    break
+
+            # Si no está en el kardex pero el historial dice que está aprobado
+            if estatus_nivel == "PENDIENTE" and nivel_info["nivel"] <= nivel_num:
+                estatus_nivel = "APROBADA"
+                clave_encontrada = nivel_info["codigos"][0]
+
+            if estatus_nivel == "APROBADA":
+                icono = "✅"
+            elif estatus_nivel in ("EN_CURSO", "RECURSANDO"):
+                icono = "🟠" if estatus_nivel == "RECURSANDO" else "🟡"
+            elif estatus_nivel == "REPROBADA":
+                icono = "🔴"
+            else:
+                icono = "⚪"
+
+            ingles_rows.append({
+                "Nivel": nivel_info["nivel"],
+                "Materia": nivel_info["nombre"],
+                "Clave": clave_encontrada if clave_encontrada else "-",
+                "Estado": f"{icono} {estatus_nivel}",
+            })
+
+        import pandas as _pd_ing
+        df_ingles = _pd_ing.DataFrame(ingles_rows)
+        st.dataframe(df_ingles, use_container_width=True, hide_index=True)
+
+        # Resumen
+        aprobados_count = sum(1 for r in ingles_rows if "APROBADA" in r["Estado"])
+        en_curso_count = sum(1 for r in ingles_rows if "EN_CURSO" in r["Estado"] or "RECURSANDO" in r["Estado"])
+        if nivel_historial:
+            st.caption(f"📊 Último nivel aprobado según historial: **{nivel_historial}** ({aprobados_count}/6 niveles)")
+        if ingles_ok:
+            st.success("✅ Requisito de inglés completado (Tópicos 2 aprobado)")
+        else:
+            faltan = 6 - aprobados_count
+            st.info(f"📚 Faltan {faltan} nivel(es) para completar el requisito de inglés (hasta Tópicos Selectos II)")
 
     # ===================================================================
     # PESTAÑA 4: PRE-ESPECIALIDADES

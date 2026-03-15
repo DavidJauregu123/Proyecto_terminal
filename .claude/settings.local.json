@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"c:/Users/rocko/OneDrive/Desktop/PT/david1/Proyecto_terminal/ilovepdf_pages-to-jpg \\(1\\)/\")",
+      "Bash(source venv/Scripts/activate)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\(''dashboard/app.py'', doraise=True\\); print\\(''Syntax OK''\\)\")",
+      "Bash(python -c \":*)"
+    ]
+  }
+}

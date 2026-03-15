@@ -10,6 +10,7 @@ class ProgresoCiclo:
     finalizadas: int
     en_curso: int
     reprobadas: int
+    recursando: int = 0
     pendientes: int = 0
     total: int = 0
     porcentaje: float = 0.0
@@ -52,13 +53,15 @@ class AcademicProcessor:
                 continue
             
             if ciclo not in progreso_por_ciclo:
-                progreso_por_ciclo[ciclo] = {"finalizadas": 0, "en_curso": 0, "reprobadas": 0, "pendientes": 0, "total": 0}
-            
+                progreso_por_ciclo[ciclo] = {"finalizadas": 0, "en_curso": 0, "reprobadas": 0, "recursando": 0, "pendientes": 0, "total": 0}
+
             progreso_por_ciclo[ciclo]["total"] += 1
             estatus = row["estatus"]
             if estatus == "APROBADA":
                 progreso_por_ciclo[ciclo]["finalizadas"] += 1
-            elif estatus in ("EN_CURSO", "RECURSANDO"):
+            elif estatus == "RECURSANDO":
+                progreso_por_ciclo[ciclo]["recursando"] += 1
+            elif estatus == "EN_CURSO":
                 progreso_por_ciclo[ciclo]["en_curso"] += 1
             elif estatus == "REPROBADA":
                 progreso_por_ciclo[ciclo]["reprobadas"] += 1
@@ -66,8 +69,8 @@ class AcademicProcessor:
         # Contar materias pendientes por ciclo (del mapa curricular)
         for ciclo in range(1, 5):
             if ciclo not in progreso_por_ciclo:
-                progreso_por_ciclo[ciclo] = {"finalizadas": 0, "en_curso": 0, "reprobadas": 0, "pendientes": 0, "total": 0}
-            
+                progreso_por_ciclo[ciclo] = {"finalizadas": 0, "en_curso": 0, "reprobadas": 0, "recursando": 0, "pendientes": 0, "total": 0}
+
             # Materias que deberían estar en este ciclo
             materias_del_ciclo = [m for m, info in self.mapa_curricular.items() if info.get("ciclo") == ciclo]
             # Materias pendientes = que están en el ciclo pero no han sido cursadas
@@ -83,6 +86,7 @@ class AcademicProcessor:
                 finalizadas=datos["finalizadas"],
                 en_curso=datos["en_curso"],
                 reprobadas=datos["reprobadas"],
+                recursando=datos["recursando"],
                 pendientes=datos["pendientes"],
                 total=datos["total"],
                 porcentaje=round(porcentaje, 2)
@@ -90,33 +94,29 @@ class AcademicProcessor:
         
         return resultado
     
-    def calcular_requisitos(self, historial_df: pd.DataFrame) -> Dict[str, bool]:
+    def calcular_requisitos(self, historial_df: pd.DataFrame, ingles_completo: bool = False) -> Dict[str, bool]:
         """
-        Detecta si el estudiante cumple los requisitos adicionales basándose
-        en las claves de materias del kardex.
-        
-        - Inglés: materias con prefijo LI (ej: LI1102, LI0109) con S/A=aprobada o calificacion
-        - Actividad Deportiva: materias con prefijo AD
-        - Actividad Cultural: materias con prefijo TA o AC
+        Detecta si el estudiante cumple los requisitos adicionales.
+
+        - Inglés: Solo se marca como cumplido si el historial académico indica
+          "Tópicos 2" aprobado (ingles_completo=True).
+        - Actividad Deportiva: materias con prefijo AD aprobadas
+        - Actividad Cultural: materias con prefijo TA o AC aprobadas
         """
-        requisitos = {"Inglés": False, "Actividad Deportiva": False, "Actividad Cultural": False}
-        
+        requisitos = {"Inglés": ingles_completo, "Actividad Deportiva": False, "Actividad Cultural": False}
+
         for _, row in historial_df.iterrows():
             clave = str(row.get("clave", ""))
             estatus = row.get("estatus", "")
-            
-            # Inglés: LI#### con calificación o estatus SIN_REGISTRAR (S/A = aprobado en UdC)
-            if clave.startswith("LI") and estatus in ("APROBADA", "SIN_REGISTRAR"):
-                requisitos["Inglés"] = True
-            
+
             # Deportiva: AD####
             if clave.startswith("AD") and estatus in ("APROBADA", "SIN_REGISTRAR"):
                 requisitos["Actividad Deportiva"] = True
-            
+
             # Cultural: TA#### o AC####
             if (clave.startswith("TA") or clave.startswith("AC")) and estatus in ("APROBADA", "SIN_REGISTRAR"):
                 requisitos["Actividad Cultural"] = True
-        
+
         return requisitos
     
     def identificar_alertas(self, historial_df: pd.DataFrame, situacion: str = "REGULAR") -> List[Dict]:
@@ -132,67 +132,78 @@ class AcademicProcessor:
         """
         alertas = []
         
+        # Construir diccionario de nombres {clave: nombre}
+        nombres_materias = {}
+        for _, row in historial_df.iterrows():
+            clave = row["clave"]
+            nombre = row.get("nombre", "")
+            if clave and nombre:
+                nombres_materias[clave] = nombre
+
         # Contar intentos por materia (solo contar registros con calificación o reprobadas)
         intentos_por_materia = {}
         reprobadas_por_materia = {}
         materias_actualmente_reprobadas = set()  # Materias que siguen reprobadas
-        
+
         for _, row in historial_df.iterrows():
             clave = row["clave"]
             estatus = row["estatus"]
-            
+
             # Solo contar intentos reales (no EN_CURSO sin calificación)
             if estatus in ("APROBADA", "REPROBADA"):
                 intentos_por_materia[clave] = intentos_por_materia.get(clave, 0) + 1
-            
+
             # Contar solo reprobadas
             if estatus == "REPROBADA":
                 reprobadas_por_materia[clave] = reprobadas_por_materia.get(clave, 0) + 1
-        
+
         # Identificar materias que siguen reprobadas (no fueron re-cursadas y aprobadas)
         for clave, count_reprobadas in reprobadas_por_materia.items():
             # Verificar si la materia fue aprobada después o está siendo cursada actualmente
             aprobada = ((historial_df["clave"] == clave) & (historial_df["estatus"] == "APROBADA")).any()
-            en_curso = ((historial_df["clave"] == clave) & (historial_df["estatus"] == "EN_CURSO")).any()
+            en_curso = ((historial_df["clave"] == clave) & (historial_df["estatus"].isin(["EN_CURSO", "RECURSANDO"]))).any()
             if not aprobada and not en_curso:
                 materias_actualmente_reprobadas.add(clave)
-        
+
         # Regla 1: Tercera Oportunidad (2 o más reprobaciones = en tercera oportunidad)
         for clave in materias_actualmente_reprobadas:
             count = reprobadas_por_materia.get(clave, 0)
+            nombre = nombres_materias.get(clave, clave)
             if count >= 3:
                 alertas.append({
                     "tipo": "BAJA_AUTOMÁTICA",
                     "materia_clave": clave,
-                    "descripcion": f"⚠️ CRÍTICO: La materia {clave} ha sido reprobada {count} veces. Contacte con coordinación académica URGENTEMENTE.",
+                    "descripcion": f"⚠️ CRÍTICO: La materia {clave} - {nombre} ha sido reprobada {count} veces. Contacte con coordinación académica URGENTEMENTE.",
                     "severidad": "CRITICA"
                 })
             elif count >= 2:
                 alertas.append({
                     "tipo": "TERCERA_OPORTUNIDAD",
                     "materia_clave": clave,
-                    "descripcion": f"⚠️ La materia {clave} está en tercera oportunidad (reprobada {count} veces). Una reprobación más resulta en baja automática.",
+                    "descripcion": f"⚠️ La materia {clave} - {nombre} está en tercera oportunidad (reprobada {count} veces). Una reprobación más resulta en baja automática.",
                     "severidad": "CRITICA"
                 })
-        
+
         # Regla 2: Solo mostrar alertas de materias reprobadas si hay reprobadas SIN recuperar
         total_reprobadas_activas = len(materias_actualmente_reprobadas)
-        
+
+        # Listar materias reprobadas activas con nombre
+        lista_reprobadas = [f"{c} - {nombres_materias.get(c, c)}" for c in sorted(materias_actualmente_reprobadas)]
+        detalle_reprobadas = "; ".join(lista_reprobadas) if lista_reprobadas else ""
+
         # Si el estudiante es REGULAR, no debería tener materias reprobadas activas
         if situacion.upper() == "REGULAR" and total_reprobadas_activas > 0:
-            # Caso excepcional: estudiante marcado como regular pero tiene reprobadas
-            # Probablemente son materias en proceso de regularización
             pass
         elif total_reprobadas_activas >= 3:
             alertas.append({
                 "tipo": "ALUMNO_IRREGULAR",
-                "descripcion": f"El estudiante presenta irregularidad académica con {total_reprobadas_activas} materias reprobadas sin regularizar",
+                "descripcion": f"El estudiante presenta irregularidad académica con {total_reprobadas_activas} materias reprobadas sin regularizar: {detalle_reprobadas}",
                 "severidad": "ADVERTENCIA"
             })
         elif total_reprobadas_activas >= 1 and situacion.upper() != "REGULAR":
             alertas.append({
                 "tipo": "MATERIAS_REPROBADAS",
-                "descripcion": f"El estudiante tiene {total_reprobadas_activas} materia(s) reprobada(s) pendiente(s) de regularizar",
+                "descripcion": f"El estudiante tiene {total_reprobadas_activas} materia(s) reprobada(s) pendiente(s) de regularizar: {detalle_reprobadas}",
                 "severidad": "ADVERTENCIA"
             })
         
