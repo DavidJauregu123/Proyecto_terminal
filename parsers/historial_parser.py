@@ -36,6 +36,7 @@ class HistorialParser:
         "tercer ciclo": 3,
         "cuarto ciclo": 4,
         "tercer y cuarto ciclo": 3,  # materias compartidas, asignamos ciclo 3
+        "primer al cuarto ciclo": 0,  # co-curricular, abarca todos los ciclos
     }
 
     CATEGORIAS_TEXTO = {
@@ -150,7 +151,7 @@ class HistorialParser:
         categoria_actual = "BASICA"
 
         re_ciclo = re.compile(
-            r'(primer ciclo|segundo ciclo|tercer ciclo|cuarto ciclo|tercer y cuarto ciclo)',
+            r'(primer al cuarto ciclo|tercer y cuarto ciclo|primer ciclo|segundo ciclo|tercer ciclo|cuarto ciclo)',
             re.IGNORECASE
         )
         re_categoria = re.compile(
@@ -197,11 +198,28 @@ class HistorialParser:
                 r'^(\d[\d,]* |(?:\d+ al \d+) )([A-Z]{2,4}\d{4})\s+(.+?)\s+(\d+)(?:\s+(\S+))?\s*$',
                 linea_strip
             )
-            if m_mat and ciclo_actual > 0:
+            if m_mat and ciclo_actual >= 0 and (ciclo_actual > 0 or categoria_actual == "CO_CURRICULAR"):
                 clave = m_mat.group(2)
                 nombre = m_mat.group(3).strip()
-                creditos = int(m_mat.group(4))
+                creditos_str = m_mat.group(4)
+                creditos = int(creditos_str)
                 calificacion = m_mat.group(5) if m_mat.group(5) else None
+
+                # Fix: nombres que terminan en número (ej: "Movilidad 1")
+                # El regex non-greedy toma "Movilidad" como nombre y "1" como créditos
+                # En el historial, calificaciones válidas son >= 7 o "S"/"S/A"
+                # Si la "calificación" parseada es un número < 7, en realidad es créditos
+                # y lo que se parseó como créditos es parte del nombre
+                if calificacion is not None:
+                    try:
+                        cal_num = float(calificacion)
+                        if 0 < cal_num < 7:
+                            # Re-interpretar: créditos es parte del nombre
+                            nombre = f"{nombre} {creditos_str}"
+                            creditos = int(calificacion)
+                            calificacion = None
+                    except ValueError:
+                        pass  # S, S/A u otro texto válido
 
                 # Determinar estatus basado en calificación
                 estatus = "PENDIENTE"
