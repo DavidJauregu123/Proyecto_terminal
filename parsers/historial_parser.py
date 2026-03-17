@@ -51,15 +51,15 @@ class HistorialParser:
     # Cadena de inglés ordenada de menor a mayor nivel
     # Mapea tanto códigos del plan 2021ID como códigos legacy (LI)
     # Nivel máximo requerido para cumplir requisito de inglés
-    NIVEL_INGLES_REQUERIDO = 6  # Tópicos 2 (ID0606)
+    NIVEL_INGLES_REQUERIDO = 6  # Tópicos 2 (LI0110)
 
     CADENA_INGLES = [
-        {"nivel": 1, "nombres": ["nivel 1"], "codigos": ["ID0107", "LI1101"]},
-        {"nivel": 2, "nombres": ["nivel 2"], "codigos": ["ID0207", "LI1102"]},
-        {"nivel": 3, "nombres": ["nivel 3"], "codigos": ["ID0307", "LI1103"]},
-        {"nivel": 4, "nombres": ["nivel 4"], "codigos": ["ID0406"]},
-        {"nivel": 5, "nombres": ["tópicos 1", "topicos 1", "tópicos selectos de inglés i", "topicos selectos de ingles i"], "codigos": ["ID0507"]},
-        {"nivel": 6, "nombres": ["tópicos 2", "topicos 2", "tópicos selectos de inglés ii", "topicos selectos de ingles ii"], "codigos": ["ID0606"]},
+        {"nivel": 1, "nombres": ["nivel 1"], "codigos": ["LI1101"]},
+        {"nivel": 2, "nombres": ["nivel 2"], "codigos": ["LI1102"]},
+        {"nivel": 3, "nombres": ["nivel 3"], "codigos": ["LI1103"]},
+        {"nivel": 4, "nombres": ["nivel 4"], "codigos": ["LI1104"]},
+        {"nivel": 5, "nombres": ["tópicos 1", "topicos 1", "tópicos selectos de inglés", "topicos selectos de ingles", "tópicos selectos de inglés i", "topicos selectos de ingles i"], "codigos": ["LI0109"]},
+        {"nivel": 6, "nombres": ["tópicos 2", "topicos 2", "tópicos selectos de inglés ii", "topicos selectos de ingles ii"], "codigos": ["LI0110"]},
     ]
 
     def __init__(self):

@@ -644,7 +644,7 @@ def main():
                     st.success(f"✅ Historial procesado: {n_total} materias, {n_aprobadas} aprobadas")
                     st.info(f"📊 Créditos: {historial_parser.creditos_acumulados}/{historial_parser.creditos_totales}")
                     if historial_parser.nivel_ingles_texto:
-                        st.info(f"🇬🇧 Inglés aprobado: {historial_parser.nivel_ingles_texto} ({len(historial_parser.codigos_ingles_aprobados)} niveles auto-aprobados)")
+                        st.info(f"📖 Inglés aprobado: {historial_parser.nivel_ingles_texto} ({len(historial_parser.codigos_ingles_aprobados)} niveles auto-aprobados)")
                 except Exception as e:
                     import traceback
                     st.error(f"❌ Error al procesar historial: {str(e)}")
@@ -1255,16 +1255,16 @@ def main():
 
         # ── Detalle de progreso de Inglés ──
         st.markdown("---")
-        st.subheader("🇬🇧 Progreso de Inglés")
+        st.subheader("📖 Progreso de Inglés")
 
         # Cadena completa de inglés para mostrar progreso
         cadena_ingles_display = [
-            {"nivel": 1, "nombre": "Nivel 1 Inglés", "codigos": ["ID0107", "LI1101"]},
-            {"nivel": 2, "nombre": "Nivel 2 Inglés", "codigos": ["ID0207", "LI1102"]},
-            {"nivel": 3, "nombre": "Nivel 3 Inglés", "codigos": ["ID0307", "LI1103"]},
-            {"nivel": 4, "nombre": "Nivel 4 Inglés", "codigos": ["ID0406"]},
-            {"nivel": 5, "nombre": "Tópicos Selectos I", "codigos": ["ID0507"]},
-            {"nivel": 6, "nombre": "Tópicos Selectos II", "codigos": ["ID0606"]},
+            {"nivel": 1, "nombre": "Nivel 1 Inglés", "codigos": ["LI1101"]},
+            {"nivel": 2, "nombre": "Nivel 2 Inglés", "codigos": ["LI1102"]},
+            {"nivel": 3, "nombre": "Nivel 3 Inglés", "codigos": ["LI1103"]},
+            {"nivel": 4, "nombre": "Nivel 4 Inglés", "codigos": ["LI1104"]},
+            {"nivel": 5, "nombre": "Tópicos Selectos I", "codigos": ["LI0109"]},
+            {"nivel": 6, "nombre": "Tópicos Selectos II", "codigos": ["LI0110"]},
         ]
 
         nivel_historial = st.session_state.get("nivel_ingles_texto", "")
