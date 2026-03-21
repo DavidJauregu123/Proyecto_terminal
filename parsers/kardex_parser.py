@@ -59,10 +59,10 @@ class KardexParser:
             materias = self._extraer_materias_texto(texto_completo)
             totales = self._extraer_totales(texto_completo)
             
-            # Asignar ciclo desde el mapa curricular oficial (no por orden cronológico)
+            # Asignar ciclo desde el mapa curricular oficial (semestres 1-8)
             import json
             from pathlib import Path as _Path
-            mapa_path = _Path(__file__).parent.parent / "data" / "mapa_curricular_2021ID.json"
+            mapa_path = _Path(__file__).parent.parent / "data" / "mapa_curricular_2021ID_real_completo.json"
             mapa_curricular_local = {}
             if mapa_path.exists():
                 with open(mapa_path, "r", encoding="utf-8") as _f:
