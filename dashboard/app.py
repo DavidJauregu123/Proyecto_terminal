@@ -240,8 +240,17 @@ def detectar_sabaticos(historial_df):
     if not periodos:
         return base
 
-    periodos_normales = sorted(p for p in periodos if p[-2:] in ("01", "03"))
-    periodos_vacaciones = sorted(p for p in periodos if p[-2:] in ("02", "04"))
+    # Excluir periodos donde TODAS las materias son BAJA_TEMPORAL (BTT)
+    periodos_btt = set()
+    if "estatus" in historial_df.columns:
+        for p in periodos:
+            materias_periodo = historial_df[historial_df["periodo"].astype(str).str.strip() == p]
+            if not materias_periodo.empty and (materias_periodo["estatus"] == "BAJA_TEMPORAL").all():
+                periodos_btt.add(p)
+    periodos_activos = periodos - periodos_btt
+
+    periodos_normales = sorted(p for p in periodos_activos if p[-2:] in ("01", "03"))
+    periodos_vacaciones = sorted(p for p in periodos_activos if p[-2:] in ("02", "04"))
 
     if not periodos_normales:
         return base
@@ -964,6 +973,7 @@ def main():
                         "calificacion": cal,
                         "creditos": cred,
                         "nombre": str(row.get("nombre", "")).strip(),
+                        "periodo": str(row.get("periodo", "")).strip(),
                     })
 
                 # ── Cargar mapa curricular ──

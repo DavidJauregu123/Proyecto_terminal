@@ -60,17 +60,55 @@ def detectar_ciclo_actual(
     Determina el ciclo actual del estudiante (en semestres 1-8).
 
     Algoritmo:
-      - Primero encuentra el semestre más alto donde el estudiante tiene
-        contacto (aprobada o en curso). Esto cubre estudiantes que cursan
-        materias de semestres avanzados aunque tengan rezago atrás.
-      - Luego, recorre los semestres del 1 al tope de contacto:
-        * Si aprobó >=75% del semestre → superado, avanzar.
-        * Si aprobó <75% → ese es el ciclo actual (primer no superado).
-      - Si el estudiante superó todos los semestres hasta su tope de contacto,
-        el ciclo actual es el siguiente (o el tope si ya es 8).
+      Cuenta los periodos hábiles únicos (terminados en 01 o 03) que el
+      estudiante ha cursado en su kardex. Periodos de vacaciones (02, 04)
+      no cuentan como semestres regulares.
+
+      El resultado se limita al rango 1-8 del plan de estudios.
 
     Returns:
         int: Ciclo actual (semestre 1-8)
+    """
+    # Extraer todos los periodos únicos del historial, excluyendo
+    # periodos donde TODAS las materias son BAJA_TEMPORAL (BTT).
+    periodos_todas = set()
+    periodos_btt = set()
+    materias_por_periodo = {}
+    for mat in historial:
+        p = str(mat.get("periodo", "")).strip()
+        estatus = str(mat.get("estatus", "")).upper()
+        if len(p) == 6 and p.isdigit():
+            periodos_todas.add(p)
+            materias_por_periodo.setdefault(p, []).append(estatus)
+
+    # Un periodo es BTT si TODAS sus materias tienen estatus BAJA_TEMPORAL
+    for p, estatuses in materias_por_periodo.items():
+        if all(e == "BAJA_TEMPORAL" for e in estatuses):
+            periodos_btt.add(p)
+
+    periodos_activos = periodos_todas - periodos_btt
+
+    # Contar solo periodos hábiles (01 = Primavera, 03 = Otoño)
+    periodos_habiles = sorted(p for p in periodos_activos if p[-2:] in ("01", "03"))
+
+    if not periodos_habiles:
+        # Sin periodos en el historial: fallback por avance académico
+        return _detectar_ciclo_por_avance(historial, mapa)
+
+    # El semestre actual es el número de periodos hábiles cursados,
+    # limitado al rango 1-8
+    ciclo_actual = min(len(periodos_habiles), 8)
+
+    return max(1, ciclo_actual)
+
+
+def _detectar_ciclo_por_avance(
+    historial: List[Dict],
+    mapa: List[Dict]
+) -> int:
+    """
+    Fallback: detecta el ciclo por avance académico (75% de básicas)
+    cuando no hay información de periodos en el historial.
     """
     aprobadas = {
         str(mat.get("clave", "")).strip().upper()
@@ -84,10 +122,6 @@ def detectar_ciclo_actual(
     }
     en_contacto = aprobadas | en_curso
 
-    # Separar EL por ciclo del mapa (no por corte numérico global):
-    # - early: EL cuyo ciclo en el plan es 1-4 (1 recomendada por sem, sin carry)
-    # - late:  EL cuyo ciclo en el plan es 5-8 (acumulativo con carry-over)
-    # Esto evita que EL tomadas en sems 1-4 inflen el crédito de sems 5-8.
     el_claves_early = {
         str(m.get("clave", "")).strip().upper()
         for m in mapa
@@ -95,27 +129,16 @@ def detectar_ciclo_actual(
     }
     el_total_early = len(el_claves_early & en_contacto)
 
-    # Encontrar el semestre más alto donde el estudiante tiene contacto.
-    # Esto evita que un estudiante con rezago en semestres bajos pero que
-    # ya cursa materias avanzadas quede atrapado en un ciclo bajo.
-    tope_contacto = 0
-    for ciclo in range(1, 9):
-        materias_ciclo = [m for m in mapa if m.get("ciclo") == ciclo]
-        claves_ciclo = {str(m.get("clave", "")).strip().upper() for m in materias_ciclo}
-        if claves_ciclo & en_contacto:
-            tope_contacto = ciclo
-
-    if tope_contacto == 0:
-        return 1
-
-    # Recorrer del 1 al tope de contacto para encontrar el primer ciclo
-    # que NO se ha superado (< 75% de básicas aprobadas).
     ciclo_actual = 1
 
-    for ciclo in range(1, tope_contacto + 1):
+    for ciclo in range(1, 9):
         materias_ciclo = [m for m in mapa if m.get("ciclo") == ciclo]
         if not materias_ciclo:
             continue
+
+        claves_ciclo = {str(m.get("clave", "")).strip().upper() for m in materias_ciclo}
+        if not (claves_ciclo & en_contacto):
+            break
 
         ciclo_actual = ciclo
 
@@ -144,12 +167,7 @@ def detectar_ciclo_actual(
 
         if porcentaje < 0.75:
             break
-        # Superó 75% → avanzar al siguiente
         ciclo_actual = min(ciclo + 1, 8)
-
-    # Si el estudiante tiene contacto más allá del ciclo calculado por 75%,
-    # usar el mayor entre ambos: ya está cursando ese semestre.
-    ciclo_actual = max(ciclo_actual, tope_contacto)
 
     return ciclo_actual
 
