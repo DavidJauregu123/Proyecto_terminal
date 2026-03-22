@@ -60,12 +60,14 @@ def detectar_ciclo_actual(
     Determina el ciclo actual del estudiante (en semestres 1-8).
 
     Algoritmo:
-      - Recorre semestres del 1 al 8.
-      - Si el estudiante no tiene ninguna materia en contacto (aprobada o en curso)
-        en ese semestre, detiene la búsqueda (no ha iniciado ese semestre).
-      - Si tiene contacto: ese semestre es al menos el actual.
-        * Si aprobó >=75% del semestre → avanza al siguiente.
-        * Si aprobó <75% → ese es el semestre actual.
+      - Primero encuentra el semestre más alto donde el estudiante tiene
+        contacto (aprobada o en curso). Esto cubre estudiantes que cursan
+        materias de semestres avanzados aunque tengan rezago atrás.
+      - Luego, recorre los semestres del 1 al tope de contacto:
+        * Si aprobó >=75% del semestre → superado, avanzar.
+        * Si aprobó <75% → ese es el ciclo actual (primer no superado).
+      - Si el estudiante superó todos los semestres hasta su tope de contacto,
+        el ciclo actual es el siguiente (o el tope si ya es 8).
 
     Returns:
         int: Ciclo actual (semestre 1-8)
@@ -91,43 +93,32 @@ def detectar_ciclo_actual(
         for m in mapa
         if m.get("categoria") == "ELECCION_LIBRE" and m.get("ciclo", 0) <= 4
     }
-    el_claves_late = {
-        str(m.get("clave", "")).strip().upper()
-        for m in mapa
-        if m.get("categoria") == "ELECCION_LIBRE" and m.get("ciclo", 0) >= 5
-    }
     el_total_early = len(el_claves_early & en_contacto)
-    el_total_late  = len(el_claves_late  & en_contacto)
 
-    # Contar Preespecialidad totales tomadas (aprobadas o en curso) para el enfoque acumulativo
-    preesp_claves_plan = {
-        str(m.get("clave", "")).strip().upper()
-        for m in mapa
-        if m.get("categoria") == "PREESPECIALIDAD"
-    }
-    preesp_total = len(preesp_claves_plan & (aprobadas | en_curso))
+    # Encontrar el semestre más alto donde el estudiante tiene contacto.
+    # Esto evita que un estudiante con rezago en semestres bajos pero que
+    # ya cursa materias avanzadas quede atrapado en un ciclo bajo.
+    tope_contacto = 0
+    for ciclo in range(1, 9):
+        materias_ciclo = [m for m in mapa if m.get("ciclo") == ciclo]
+        claves_ciclo = {str(m.get("clave", "")).strip().upper() for m in materias_ciclo}
+        if claves_ciclo & en_contacto:
+            tope_contacto = ciclo
 
+    if tope_contacto == 0:
+        return 1
+
+    # Recorrer del 1 al tope de contacto para encontrar el primer ciclo
+    # que NO se ha superado (< 75% de básicas aprobadas).
     ciclo_actual = 1
 
-    for ciclo in range(1, 9):
+    for ciclo in range(1, tope_contacto + 1):
         materias_ciclo = [m for m in mapa if m.get("ciclo") == ciclo]
         if not materias_ciclo:
             continue
 
-        claves_ciclo = {str(m.get("clave", "")).strip().upper() for m in materias_ciclo}
-
-        # Si no hay ninguna materia de este ciclo en contacto, el estudiante
-        # aún no ha iniciado este ciclo → el actual es el anterior.
-        if not (claves_ciclo & en_contacto):
-            break
-
-        # Tiene contacto: este ciclo es candidato a actual
         ciclo_actual = ciclo
 
-        # El 75% se calcula SOLO sobre BÁSICAS: las EL y PREESPECIALIDAD son
-        # optativas distribuidas libremente, no bloquean el avance de semestre.
-        # Las Prácticas Profesionales (clave PID*) tampoco cuentan: tienen su
-        # propia lógica de alerta independiente.
         basicas_ciclo = {
             str(m.get("clave", "")).strip().upper()
             for m in materias_ciclo
@@ -135,17 +126,11 @@ def detectar_ciclo_actual(
             and not str(m.get("clave", "")).strip().upper().startswith("PID")
         }
         if not basicas_ciclo:
-            # Semestre sin básicas (no debería ocurrir) → avanzar sin restricción
             continue
 
         cursadas_basicas = len(basicas_ciclo & (aprobadas | en_curso))
         total_basicas = len(basicas_ciclo)
 
-        # --- Componente de Elección Libre (solo sems 1-4) ---
-        # En sems 1-4: 1 EL por semestre entra al umbral.
-        # En sems 5-8: solo se usan las BÁSICAS (el usuario pidió no tomar
-        #   en cuenta EL ni PREESP para el análisis de semestre actual
-        #   en los últimos 2 ciclos anuales).
         if ciclo <= 4:
             el_credit = min(el_total_early, ciclo) - min(el_total_early, ciclo - 1)
             el_recomendadas = 1
@@ -158,9 +143,13 @@ def detectar_ciclo_actual(
         porcentaje = cursadas_total / total_ciclo
 
         if porcentaje < 0.75:
-            # No superó el 75% → este es el ciclo actual
             break
-        # Superó 75% → avanzar al siguiente ciclo
+        # Superó 75% → avanzar al siguiente
+        ciclo_actual = min(ciclo + 1, 8)
+
+    # Si el estudiante tiene contacto más allá del ciclo calculado por 75%,
+    # usar el mayor entre ambos: ya está cursando ese semestre.
+    ciclo_actual = max(ciclo_actual, tope_contacto)
 
     return ciclo_actual
 

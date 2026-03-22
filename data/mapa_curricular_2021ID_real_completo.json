@@ -132,7 +132,7 @@
     "categoria": "BASICA",
     "creditos": 8,
     "bloque": "S",
-    "requisitos": [],
+    "requisitos": ["II0106"],
     "origen": "excel_oficial",
     "legacy_claves": [
       "ID0301"

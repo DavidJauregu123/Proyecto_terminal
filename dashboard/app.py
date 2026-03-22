@@ -166,6 +166,125 @@ def crear_grafica_progreso_ciclo(ciclo: int, progreso: dict) -> go.Figure:
     return fig
 
 
+def obtener_materias_por_estatus_ciclo(historial_filtrado_df, mapa_curricular_lista):
+    """
+    Devuelve un dict {ciclo: {estatus_label: [{Clave, Nombre, Créditos, Categoría}]}}
+    para poder mostrar qué materias componen cada segmento de las gráficas.
+    """
+    status_map = {}
+    for _, row in historial_filtrado_df.iterrows():
+        clave = str(row.get("clave", "")).strip().upper()
+        status_map[clave] = row.get("estatus", "")
+
+    result = {}
+    for ciclo in range(1, 9):
+        materias_ciclo = [m for m in mapa_curricular_lista if m.get("ciclo") == ciclo]
+        grupos = {
+            "Finalizadas": [], "En Curso": [], "Recursando": [],
+            "Reprobadas": [], "Pendientes": [],
+        }
+        for m in materias_ciclo:
+            clave = str(m.get("clave", "")).strip().upper()
+            estatus = status_map.get(clave, "")
+            info = {
+                "Clave": clave,
+                "Nombre": m.get("nombre", ""),
+                "Créditos": m.get("creditos", 0),
+                "Categoría": m.get("categoria", ""),
+            }
+            if estatus == "APROBADA":
+                grupos["Finalizadas"].append(info)
+            elif estatus == "EN_CURSO":
+                grupos["En Curso"].append(info)
+            elif estatus == "RECURSANDO":
+                grupos["Recursando"].append(info)
+            elif estatus == "REPROBADA":
+                grupos["Reprobadas"].append(info)
+            else:
+                grupos["Pendientes"].append(info)
+        result[ciclo] = grupos
+    return result
+
+
+def detectar_sabaticos(historial_df):
+    """
+    Detecta semestres sabáticos a partir de los periodos del kardex.
+
+    Periodos normales (hábiles): terminan en 01 (Primavera) o 03 (Otoño).
+    Periodos de vacaciones: terminan en 02 (Verano) o 04 (Invierno).
+
+    Un sabático es un semestre hábil (01 o 03) donde el estudiante
+    no cursó ninguna materia, dentro del rango entre su primer y último
+    semestre registrado.
+
+    Returns:
+        dict con: sabaticos, cantidad, max_permitidos, restantes,
+                  semestres_activos, tiempo_max_años, semestres_max,
+                  periodos_normales_cursados, periodos_vacaciones
+    """
+    base = {
+        "sabaticos": [], "cantidad": 0, "max_permitidos": 3, "restantes": 3,
+        "semestres_activos": 0, "tiempo_max_años": 8.0, "semestres_max": 16,
+        "periodos_normales_cursados": [], "periodos_vacaciones": [],
+    }
+
+    if historial_df.empty or "periodo" not in historial_df.columns:
+        return base
+
+    periodos = set()
+    for p in historial_df["periodo"].dropna().astype(str).tolist():
+        p = p.strip()
+        if len(p) == 6 and p.isdigit():
+            periodos.add(p)
+
+    if not periodos:
+        return base
+
+    periodos_normales = sorted(p for p in periodos if p[-2:] in ("01", "03"))
+    periodos_vacaciones = sorted(p for p in periodos if p[-2:] in ("02", "04"))
+
+    if not periodos_normales:
+        return base
+
+    primer_p = periodos_normales[0]
+    ultimo_p = periodos_normales[-1]
+
+    # Generar todos los semestres hábiles esperados entre el primero y el último
+    esperados = []
+    año = int(primer_p[:4])
+    sufijo = int(primer_p[4:])
+    while True:
+        periodo = f"{año:04d}{sufijo:02d}"
+        if periodo > ultimo_p:
+            break
+        esperados.append(periodo)
+        if sufijo == 1:
+            sufijo = 3
+        else:
+            año += 1
+            sufijo = 1
+
+    sabaticos = [p for p in esperados if p not in set(periodos_normales)]
+    cantidad = len(sabaticos)
+    max_permitidos = 3
+    restantes = max(0, max_permitidos - cantidad)
+    semestres_activos = len(periodos_normales)
+    tiempo_max_años = 8.0 + min(cantidad, max_permitidos) * 0.5
+    semestres_max = 16 + min(cantidad, max_permitidos)
+
+    return {
+        "sabaticos": sabaticos,
+        "cantidad": cantidad,
+        "max_permitidos": max_permitidos,
+        "restantes": restantes,
+        "semestres_activos": semestres_activos,
+        "tiempo_max_años": tiempo_max_años,
+        "semestres_max": semestres_max,
+        "periodos_normales_cursados": periodos_normales,
+        "periodos_vacaciones": periodos_vacaciones,
+    }
+
+
 def filtrar_ultimo_estatus(historial_df: pd.DataFrame) -> pd.DataFrame:
     """
     Filtra el historial para quedarse solo con el último registro de cada materia.
@@ -782,6 +901,8 @@ def main():
         _override = _df["clave"].apply(_ciclo_oficial)
         _df["ciclo"] = _override.combine_first(_df["ciclo"].astype("float64")).astype("Int64")
 
+    info_sabaticos = detectar_sabaticos(historial_df)
+
     creditos_totales = st.session_state.get("creditos_totales", 404)
     creditos_acumulados = st.session_state.get("creditos_acumulados", datos.total_creditos)
     creditos_faltantes = max(0, creditos_totales - creditos_acumulados)
@@ -1064,6 +1185,42 @@ def main():
             st.metric("Índice de Reprobación", f"{_indice_reprobacion:.1f}%",
                      help=f"{_mat_reprobadas} reprobadas / {_mat_cursadas} cursadas")
 
+        # ── Semestres sabáticos ──
+        if info_sabaticos["cantidad"] > 0:
+            st.markdown("---")
+            _n_sab = info_sabaticos["cantidad"]
+            _rest = info_sabaticos["restantes"]
+            _color_sab = "#e67e22" if _rest > 0 else "#e74c3c"
+            st.markdown(
+                f'<div style="background:#fff8e1;border-left:4px solid {_color_sab};'
+                f'padding:15px;margin:10px 0;border-radius:5px;color:#000;">'
+                f'<strong>Semestres sab\u00e1ticos detectados: {_n_sab} de 3 permitidos</strong><br>'
+                f'Semestres activos cursados: {info_sabaticos["semestres_activos"]}'
+                f' &nbsp;|&nbsp; Restantes disponibles: {_rest}'
+                f' &nbsp;|&nbsp; Tiempo m\u00e1ximo ajustado: {info_sabaticos["tiempo_max_años"]:.1f} a\u00f1os'
+                f' ({info_sabaticos["semestres_max"]} semestres)'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+            with st.expander("Ver detalle de semestres sabáticos"):
+                _sab_rows = []
+                for p in info_sabaticos["sabaticos"]:
+                    _año = p[:4]
+                    _suf = p[4:]
+                    _temp = {"01": "Primavera", "03": "Otoño"}.get(_suf, p[4:])
+                    _sab_rows.append({"Periodo": p, "Temporada": f"{_temp} {_año}"})
+                st.dataframe(pd.DataFrame(_sab_rows), use_container_width=True, hide_index=True)
+
+                if info_sabaticos["periodos_vacaciones"]:
+                    st.caption("Periodos de vacaciones (verano/invierno) donde cursó materias:")
+                    _vac_rows = []
+                    for p in info_sabaticos["periodos_vacaciones"]:
+                        _año = p[:4]
+                        _suf = p[4:]
+                        _temp = {"02": "Verano", "04": "Invierno"}.get(_suf, p[4:])
+                        _vac_rows.append({"Periodo": p, "Temporada": f"{_temp} {_año}"})
+                    st.dataframe(pd.DataFrame(_vac_rows), use_container_width=True, hide_index=True)
+
         # ── Barra de progreso general ──
         st.markdown("---")
         st.subheader("📊 Progreso de la Carrera")
@@ -1076,6 +1233,10 @@ def main():
         from datetime import datetime as _dt
         años_aprox = 0
         semestre_actual = 1
+        _num_sabaticos = info_sabaticos["cantidad"]
+        _max_semestres = info_sabaticos["semestres_max"]      # 16 + sabáticos (máx 3)
+        _max_años = info_sabaticos["tiempo_max_años"]          # 8 + 0.5 * sabáticos
+        semestre_calendario = 1
         try:
             matricula_str = datos.matricula.strip()
             if len(matricula_str) >= 2:
@@ -1084,32 +1245,40 @@ def main():
                 _hoy = _dt.now()
                 _meses = (_hoy.year - _inicio.year) * 12 + (_hoy.month - _inicio.month)
                 _meses = max(0, _meses)
-                semestre_actual = max(1, (_meses // 6) + 1)
+                semestre_calendario = max(1, (_meses // 6) + 1)
+                semestre_actual = max(1, semestre_calendario - _num_sabaticos)
                 años_aprox = round(_meses / 12, 1)
         except Exception:
             semestre_actual = max(1, ciclos_unicos * 2)
+            semestre_calendario = semestre_actual + _num_sabaticos
 
+        # Ritmo basado en semestres activos (sin sabáticos)
         _ritmo = creditos_acumulados / semestre_actual if semestre_actual > 0 else 0
-        _sem_proyectados = (creditos_totales / _ritmo) if _ritmo > 0 else 999
+        _sem_activos_proy = (creditos_totales / _ritmo) if _ritmo > 0 else 999
+        _sem_proyectados = _sem_activos_proy + _num_sabaticos  # proyección calendario
 
-        if semestre_actual >= 16 and creditos_acumulados < creditos_totales:
+        if semestre_calendario >= _max_semestres and creditos_acumulados < creditos_totales:
             _color_ritmo = "#7b0000"
-            _etiqueta_ritmo = "&#x26A0; CR&Iacute;TICO TOTAL &mdash; l&iacute;mite de 16 semestres alcanzado"
-        elif _sem_proyectados <= 9:
+            _etiqueta_ritmo = (
+                f"&#x26A0; CR&Iacute;TICO TOTAL &mdash; l&iacute;mite de {_max_semestres} semestres alcanzado"
+            )
+        elif _sem_proyectados <= _max_semestres * 0.5625:
             _color_ritmo = "#27ae60"
-            _etiqueta_ritmo = "En tiempo (&le;4.5 a&ntilde;os)"
-        elif _sem_proyectados <= 11:
+            _etiqueta_ritmo = "En tiempo"
+        elif _sem_proyectados <= _max_semestres * 0.6875:
             _color_ritmo = "#a8e063"
-            _etiqueta_ritmo = "Leve retraso (4.5-5.5 a&ntilde;os)"
-        elif _sem_proyectados <= 13:
+            _etiqueta_ritmo = "Leve retraso"
+        elif _sem_proyectados <= _max_semestres * 0.8125:
             _color_ritmo = "#fdcb6e"
-            _etiqueta_ritmo = "Retraso moderado (5.5-6.5 a&ntilde;os)"
-        elif _sem_proyectados < 16:
+            _etiqueta_ritmo = "Retraso moderado"
+        elif _sem_proyectados < _max_semestres:
             _color_ritmo = "#e17055"
-            _etiqueta_ritmo = "Retraso grave (6.5-8 a&ntilde;os)"
+            _etiqueta_ritmo = "Retraso grave"
         else:
             _color_ritmo = "#d63031"
-            _etiqueta_ritmo = "CR&Iacute;TICO &mdash; proyecci&oacute;n supera el l&iacute;mite de 16 semestres"
+            _etiqueta_ritmo = (
+                f"CR&Iacute;TICO &mdash; proyecci&oacute;n supera el l&iacute;mite de {_max_semestres} semestres"
+            )
 
         _fill_pct = min(porcentaje_creditos, 100.0)
         _inner = (
@@ -1130,14 +1299,21 @@ def main():
 
         _ritmo_fmt = f"{_ritmo:.1f}" if _ritmo > 0 else "—"
         _sem_proy_fmt = f"{_sem_proyectados:.0f}" if _sem_proyectados < 999 else "N/A"
+        _sab_badge = ""
+        if _num_sabaticos > 0:
+            _sab_badge = (
+                f' &nbsp;|&nbsp; <span style="color:#e67e22;">Sab\u00e1ticos: {_num_sabaticos}/3'
+                f' &nbsp;&bull;&nbsp; L\u00edmite: {_max_años:.1f} a\u00f1os ({_max_semestres} sem)</span>'
+            )
         _barra_html = (
             '<div style="background:#f7f7f7;border:1.5px solid #d0d0d0;border-radius:10px;'
             'padding:12px 14px;margin-bottom:8px;">'
             '<div style="font-size:13px;color:#555;margin-bottom:8px;font-weight:600;">'
             f'Progreso general'
             f' &nbsp;|&nbsp; {creditos_acumulados}/{creditos_totales} cr\u00e9ditos'
-            f' &nbsp;|&nbsp; Semestre {semestre_actual} ({años_aprox} a\u00f1os)'
-            f' &nbsp;|&nbsp; Ritmo: {_ritmo_fmt} cr/sem &nbsp;&bull;&nbsp; Proyecci\u00f3n: {_sem_proy_fmt} semestres'
+            f' &nbsp;|&nbsp; Sem. activo {semestre_actual} ({años_aprox} a\u00f1os)'
+            f' &nbsp;|&nbsp; Ritmo: {_ritmo_fmt} cr/sem &nbsp;&bull;&nbsp; Proyecci\u00f3n: {_sem_proy_fmt} sem'
+            f'{_sab_badge}'
             '</div>'
             '<div style="position:relative;width:100%;height:72px;background:#e0e0e0;'
             'border-radius:6px;overflow:hidden;">'
@@ -1151,7 +1327,7 @@ def main():
             '<span style="color:#a8e063;font-weight:bold;">&#9632;</span> 4.5-5.5 &nbsp;'
             '<span style="color:#fdcb6e;font-weight:bold;">&#9632;</span> 5.5-6.5 &nbsp;'
             '<span style="color:#e17055;font-weight:bold;">&#9632;</span> 6.5-8 &nbsp;'
-            '<span style="color:#d63031;font-weight:bold;">&#9632;</span> &ge;16 sem &nbsp;'
+            f'<span style="color:#d63031;font-weight:bold;">&#9632;</span> &ge;{_max_semestres} sem &nbsp;'
             '<span style="color:#7b0000;font-weight:bold;">&#9632;</span> L&iacute;mite alcanzado'
             '</div></div>'
         )
@@ -1193,6 +1369,7 @@ def main():
 
         try:
             progreso_ciclos = processor.calcular_progreso_por_ciclo(historial_filtrado)
+            materias_por_estatus = obtener_materias_por_estatus_ciclo(historial_filtrado, mapa_curricular)
 
             def _agrupar_ciclos_anuales(progreso_ciclos, sems):
                 """Suma los ProgresoCiclo de los semestres indicados."""
@@ -1243,6 +1420,23 @@ def main():
                     st.markdown(f"<div class='metric-box'>{'<br>'.join(lineas_ca)}</div>",
                                 unsafe_allow_html=True)
 
+                    # Lista de materias por segmento del ciclo anual
+                    _mat_ca = {}
+                    for _s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"]:
+                        _mat_ca[_s] = sum([materias_por_estatus.get(s, {}).get(_s, []) for s in sems_ca], [])
+                    _opc_ca = [s for s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"] if _mat_ca.get(s)]
+                    if _opc_ca:
+                        _total_ca = sum(len(_mat_ca[s]) for s in _opc_ca)
+                        with st.expander(f"Ver materias ({_total_ca})"):
+                            _sel_ca = st.selectbox(
+                                "Filtrar por:", _opc_ca,
+                                key=f"sel_ca_{'_'.join(map(str, sems_ca))}"
+                            )
+                            st.dataframe(
+                                pd.DataFrame(_mat_ca[_sel_ca]),
+                                use_container_width=True, hide_index=True
+                            )
+
         except Exception as e:
             st.warning(f"Error al calcular progreso por ciclo anual: {str(e)}")
 
@@ -1281,6 +1475,15 @@ def main():
                             lineas.append(f"⚪ Pendientes: {progreso.pendientes}")
                             st.markdown(f"<div class='metric-box'>{'<br>'.join(lineas)}</div>",
                                         unsafe_allow_html=True)
+
+                            # Lista de materias por segmento
+                            _mat_sem = materias_por_estatus.get(ciclo, {})
+                            _opc_sem = [s for s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"] if _mat_sem.get(s)]
+                            if _opc_sem:
+                                _total_sem = sum(len(_mat_sem[s]) for s in _opc_sem)
+                                with st.expander(f"Ver materias ({_total_sem})"):
+                                    _sel_sem = st.selectbox("Filtrar por:", _opc_sem, key=f"sel_sem_{ciclo}")
+                                    st.dataframe(pd.DataFrame(_mat_sem[_sel_sem]), use_container_width=True, hide_index=True)
                         else:
                             st.info(f"Sem. {ciclo}: Sin datos")
 
@@ -1310,6 +1513,15 @@ def main():
                             lineas.append(f"⚪ Pendientes: {progreso.pendientes}")
                             st.markdown(f"<div class='metric-box'>{'<br>'.join(lineas)}</div>",
                                         unsafe_allow_html=True)
+
+                            # Lista de materias por segmento
+                            _mat_sem2 = materias_por_estatus.get(ciclo, {})
+                            _opc_sem2 = [s for s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"] if _mat_sem2.get(s)]
+                            if _opc_sem2:
+                                _total_sem2 = sum(len(_mat_sem2[s]) for s in _opc_sem2)
+                                with st.expander(f"Ver materias ({_total_sem2})"):
+                                    _sel_sem2 = st.selectbox("Filtrar por:", _opc_sem2, key=f"sel_sem2_{ciclo}")
+                                    st.dataframe(pd.DataFrame(_mat_sem2[_sel_sem2]), use_container_width=True, hide_index=True)
                         else:
                             st.info(f"Sem. {ciclo}: Sin datos")
             else:
@@ -1398,6 +1610,9 @@ def main():
                     📚 Faltan: {max(0, el1["requeridas"] - el1["aprobadas"])} materias
                 </div>
                 """, unsafe_allow_html=True)
+                if el1["claves"]:
+                    with st.expander(f"Ver materias ({len(el1['claves'])})"):
+                        st.dataframe(pd.DataFrame({"Clave": el1["claves"], "Nombre": el1["nombres"]}), use_container_width=True, hide_index=True)
 
             with col_el2:
                 st.subheader("📗 Ciclo 2")
@@ -1412,6 +1627,9 @@ def main():
                     📚 Faltan: {max(0, el2["requeridas"] - el2["aprobadas"])} materias
                 </div>
                 """, unsafe_allow_html=True)
+                if el2["claves"]:
+                    with st.expander(f"Ver materias ({len(el2['claves'])})"):
+                        st.dataframe(pd.DataFrame({"Clave": el2["claves"], "Nombre": el2["nombres"]}), use_container_width=True, hide_index=True)
 
             with col_el3:
                 st.subheader("📙 Ciclos 3 y 4")
@@ -1427,6 +1645,9 @@ def main():
                     <em style="font-size: 0.85em;">Pre-especialidad de titulación: {pre_titulacion}</em>
                 </div>
                 """, unsafe_allow_html=True)
+                if el34["claves"]:
+                    with st.expander(f"Ver materias ({len(el34['claves'])})"):
+                        st.dataframe(pd.DataFrame({"Clave": el34["claves"], "Nombre": el34["nombres"]}), use_container_width=True, hide_index=True)
 
             if pre_especialidades_count["IoN"] < 5 or pre_especialidades_count["ITIC"] < 5:
                 st.info("💡 **Consejo**: Materias de la pre-especialidad no completada pueden contar como elección libre en Ciclos 3 y 4")
@@ -1592,6 +1813,23 @@ def main():
                             📚 Faltan: {max(0, 5 - aprobadas)} materias
                         </div>
                         """, unsafe_allow_html=True)
+
+                        # Lista de materias de esta pre-especialidad
+                        if datos_pre.get("claves"):
+                            _mapa_dict_pre = {str(m.get("clave", "")).upper(): m for m in mapa_curricular}
+                            _status_pre = {}
+                            for _, _r in historial_filtrado.iterrows():
+                                _status_pre[str(_r.get("clave", "")).upper()] = _r.get("estatus", "")
+                            _filas_pre = []
+                            for _cl in datos_pre["claves"]:
+                                _mi = _mapa_dict_pre.get(_cl, {})
+                                _filas_pre.append({
+                                    "Clave": _cl,
+                                    "Nombre": _mi.get("nombre", ""),
+                                    "Estado": _status_pre.get(_cl, "PENDIENTE"),
+                                })
+                            with st.expander(f"Ver materias ({len(_filas_pre)})"):
+                                st.dataframe(pd.DataFrame(_filas_pre), use_container_width=True, hide_index=True)
             else:
                 st.info("No se detectaron materias de pre-especialidad en el historial.")
         except Exception as e:
