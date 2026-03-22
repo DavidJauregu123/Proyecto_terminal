@@ -926,9 +926,10 @@ def main():
 
     with tab_historia_main:
         st.caption("Usa las pestañas inferiores para navegar el historial académico y su progreso.")
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tab1, tab2, tab2b, tab3, tab4 = st.tabs([
             "📋 Resumen General",
             "📈 Progreso por Ciclo",
+            "📅 Progreso por Semestre",
             "📚 Elección Libre y Adicionales",
             "🎓 Pre-Especialidades",
         ])
@@ -1450,95 +1451,6 @@ def main():
         except Exception as e:
             st.warning(f"Error al calcular progreso por ciclo anual: {str(e)}")
 
-        # ── Progreso por Semestre ──
-        st.markdown("---")
-        st.subheader("📅 Progreso por Semestre")
-
-        try:
-            progreso_ciclos = processor.calcular_progreso_por_ciclo(historial_filtrado)
-            ciclos_validos = sorted(c for c in progreso_ciclos.keys() if 1 <= c <= 8)
-
-            if ciclos_validos:
-                st.caption("**Semestres 1–4**")
-                cols_fila1 = st.columns(4)
-                for i, ciclo in enumerate(range(1, 5)):
-                    with cols_fila1[i]:
-                        if ciclo in progreso_ciclos:
-                            progreso = progreso_ciclos[ciclo]
-                            fig = crear_grafica_progreso_ciclo(ciclo, {
-                                "finalizadas": progreso.finalizadas,
-                                "en_curso": progreso.en_curso,
-                                "recursando": progreso.recursando,
-                                "reprobadas": progreso.reprobadas,
-                                "pendientes": progreso.pendientes
-                            })
-                            st.plotly_chart(fig, use_container_width=True)
-                            cursadas = progreso.total - progreso.pendientes
-                            lineas = [
-                                f"<strong>{progreso.porcentaje:.1f}% Completado</strong>",
-                                f"✅ Finalizadas: {progreso.finalizadas}/{cursadas}",
-                                f"⏳ En Curso: {progreso.en_curso}/{cursadas}",
-                            ]
-                            if progreso.recursando > 0:
-                                lineas.append(f"🟠 Recursando: {progreso.recursando}/{cursadas}")
-                            lineas.append(f"❌ Reprobadas: {progreso.reprobadas}/{cursadas}")
-                            lineas.append(f"⚪ Pendientes: {progreso.pendientes}")
-                            st.markdown(f"<div class='metric-box'>{'<br>'.join(lineas)}</div>",
-                                        unsafe_allow_html=True)
-
-                            # Lista de materias por segmento
-                            _mat_sem = materias_por_estatus.get(ciclo, {})
-                            _opc_sem = [s for s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"] if _mat_sem.get(s)]
-                            if _opc_sem:
-                                _total_sem = sum(len(_mat_sem[s]) for s in _opc_sem)
-                                with st.expander(f"Ver materias ({_total_sem})"):
-                                    _sel_sem = st.selectbox("Filtrar por:", _opc_sem, key=f"sel_sem_{ciclo}")
-                                    st.dataframe(pd.DataFrame(_mat_sem[_sel_sem]), use_container_width=True, hide_index=True)
-                        else:
-                            st.info(f"Sem. {ciclo}: Sin datos")
-
-                st.caption("**Semestres 5–8**")
-                cols_fila2 = st.columns(4)
-                for i, ciclo in enumerate(range(5, 9)):
-                    with cols_fila2[i]:
-                        if ciclo in progreso_ciclos:
-                            progreso = progreso_ciclos[ciclo]
-                            fig = crear_grafica_progreso_ciclo(ciclo, {
-                                "finalizadas": progreso.finalizadas,
-                                "en_curso": progreso.en_curso,
-                                "recursando": progreso.recursando,
-                                "reprobadas": progreso.reprobadas,
-                                "pendientes": progreso.pendientes
-                            })
-                            st.plotly_chart(fig, use_container_width=True)
-                            cursadas = progreso.total - progreso.pendientes
-                            lineas = [
-                                f"<strong>{progreso.porcentaje:.1f}% Completado</strong>",
-                                f"✅ Finalizadas: {progreso.finalizadas}/{cursadas}",
-                                f"⏳ En Curso: {progreso.en_curso}/{cursadas}",
-                            ]
-                            if progreso.recursando > 0:
-                                lineas.append(f"🟠 Recursando: {progreso.recursando}/{cursadas}")
-                            lineas.append(f"❌ Reprobadas: {progreso.reprobadas}/{cursadas}")
-                            lineas.append(f"⚪ Pendientes: {progreso.pendientes}")
-                            st.markdown(f"<div class='metric-box'>{'<br>'.join(lineas)}</div>",
-                                        unsafe_allow_html=True)
-
-                            # Lista de materias por segmento
-                            _mat_sem2 = materias_por_estatus.get(ciclo, {})
-                            _opc_sem2 = [s for s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"] if _mat_sem2.get(s)]
-                            if _opc_sem2:
-                                _total_sem2 = sum(len(_mat_sem2[s]) for s in _opc_sem2)
-                                with st.expander(f"Ver materias ({_total_sem2})"):
-                                    _sel_sem2 = st.selectbox("Filtrar por:", _opc_sem2, key=f"sel_sem2_{ciclo}")
-                                    st.dataframe(pd.DataFrame(_mat_sem2[_sel_sem2]), use_container_width=True, hide_index=True)
-                        else:
-                            st.info(f"Sem. {ciclo}: Sin datos")
-            else:
-                st.info("No hay datos de progreso por semestre.")
-        except Exception as e:
-            st.warning(f"Error al calcular progreso por semestre: {str(e)}")
-
         # ── Tabla de historial por ciclo ──
         st.markdown("---")
         st.subheader("📚 Historial Académico por Ciclo")
@@ -1594,6 +1506,98 @@ def main():
                     display_df = display_df[["clave", "nombre", "calificacion", "creditos", "estatus"]]
                     display_df.columns = ["Clave", "Asignatura", "Calificación", "Créditos", "Estatus"]
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    # ===================================================================
+    # PESTAÑA 2B: PROGRESO POR SEMESTRE
+    # ===================================================================
+    with tab2b:
+        st.header("📅 Progreso por Semestre")
+        st.caption("Progreso individual de cada semestre (1-8) del plan de estudios.")
+
+        try:
+            progreso_ciclos = processor.calcular_progreso_por_ciclo(historial_filtrado)
+            materias_por_estatus = obtener_materias_por_estatus_ciclo(historial_filtrado, mapa_curricular)
+            ciclos_validos = sorted(c for c in progreso_ciclos.keys() if 1 <= c <= 8)
+
+            if ciclos_validos:
+                st.caption("**Semestres 1–4**")
+                cols_fila1 = st.columns(4)
+                for i, ciclo in enumerate(range(1, 5)):
+                    with cols_fila1[i]:
+                        if ciclo in progreso_ciclos:
+                            progreso = progreso_ciclos[ciclo]
+                            fig = crear_grafica_progreso_ciclo(ciclo, {
+                                "finalizadas": progreso.finalizadas,
+                                "en_curso": progreso.en_curso,
+                                "recursando": progreso.recursando,
+                                "reprobadas": progreso.reprobadas,
+                                "pendientes": progreso.pendientes
+                            })
+                            st.plotly_chart(fig, use_container_width=True)
+                            cursadas = progreso.total - progreso.pendientes
+                            lineas = [
+                                f"<strong>{progreso.porcentaje:.1f}% Completado</strong>",
+                                f"✅ Finalizadas: {progreso.finalizadas}/{cursadas}",
+                                f"⏳ En Curso: {progreso.en_curso}/{cursadas}",
+                            ]
+                            if progreso.recursando > 0:
+                                lineas.append(f"🟠 Recursando: {progreso.recursando}/{cursadas}")
+                            lineas.append(f"❌ Reprobadas: {progreso.reprobadas}/{cursadas}")
+                            lineas.append(f"⚪ Pendientes: {progreso.pendientes}")
+                            st.markdown(f"<div class='metric-box'>{'<br>'.join(lineas)}</div>",
+                                        unsafe_allow_html=True)
+
+                            _mat_sem = materias_por_estatus.get(ciclo, {})
+                            _opc_sem = [s for s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"] if _mat_sem.get(s)]
+                            if _opc_sem:
+                                _total_sem = sum(len(_mat_sem[s]) for s in _opc_sem)
+                                with st.expander(f"Ver materias ({_total_sem})"):
+                                    _sel_sem = st.selectbox("Filtrar por:", _opc_sem, key=f"sel_sem_{ciclo}")
+                                    st.dataframe(pd.DataFrame(_mat_sem[_sel_sem]), use_container_width=True, hide_index=True)
+                        else:
+                            st.info(f"Sem. {ciclo}: Sin datos")
+
+                st.markdown("---")
+                st.caption("**Semestres 5–8**")
+                cols_fila2 = st.columns(4)
+                for i, ciclo in enumerate(range(5, 9)):
+                    with cols_fila2[i]:
+                        if ciclo in progreso_ciclos:
+                            progreso = progreso_ciclos[ciclo]
+                            fig = crear_grafica_progreso_ciclo(ciclo, {
+                                "finalizadas": progreso.finalizadas,
+                                "en_curso": progreso.en_curso,
+                                "recursando": progreso.recursando,
+                                "reprobadas": progreso.reprobadas,
+                                "pendientes": progreso.pendientes
+                            })
+                            st.plotly_chart(fig, use_container_width=True)
+                            cursadas = progreso.total - progreso.pendientes
+                            lineas = [
+                                f"<strong>{progreso.porcentaje:.1f}% Completado</strong>",
+                                f"✅ Finalizadas: {progreso.finalizadas}/{cursadas}",
+                                f"⏳ En Curso: {progreso.en_curso}/{cursadas}",
+                            ]
+                            if progreso.recursando > 0:
+                                lineas.append(f"🟠 Recursando: {progreso.recursando}/{cursadas}")
+                            lineas.append(f"❌ Reprobadas: {progreso.reprobadas}/{cursadas}")
+                            lineas.append(f"⚪ Pendientes: {progreso.pendientes}")
+                            st.markdown(f"<div class='metric-box'>{'<br>'.join(lineas)}</div>",
+                                        unsafe_allow_html=True)
+
+                            _mat_sem2 = materias_por_estatus.get(ciclo, {})
+                            _opc_sem2 = [s for s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"] if _mat_sem2.get(s)]
+                            if _opc_sem2:
+                                _total_sem2 = sum(len(_mat_sem2[s]) for s in _opc_sem2)
+                                with st.expander(f"Ver materias ({_total_sem2})"):
+                                    _sel_sem2 = st.selectbox("Filtrar por:", _opc_sem2, key=f"sel_sem2_{ciclo}")
+                                    st.dataframe(pd.DataFrame(_mat_sem2[_sel_sem2]), use_container_width=True, hide_index=True)
+                        else:
+                            st.info(f"Sem. {ciclo}: Sin datos")
+            else:
+                st.info("No hay datos de progreso por semestre.")
+        except Exception as e:
+            st.warning(f"Error al calcular progreso por semestre: {str(e)}")
 
     # ===================================================================
     # PESTAÑA 3: ELECCIÓN LIBRE Y ADICIONALES
