@@ -1001,7 +1001,9 @@ def main():
                 )
 
                 debug_info = resultado.get("debug", {})
-                ciclo_act  = resultado.get("ciclo_actual", 0)
+                sem_cursado = resultado.get("semestre_cursado", 0)
+                sem_objetivo = resultado.get("semestre_objetivo", 0)
+                ciclo_act  = sem_objetivo
                 esp        = resultado.get("especialidad_detectada") or None
                 elim_a     = debug_info.get("eliminadas_regla_a", 0)
                 elim_b     = debug_info.get("eliminadas_regla_b", 0)
@@ -1014,16 +1016,16 @@ def main():
                 st.subheader("📊 Resultado del Análisis")
                 col_met1, col_met2, col_met3 = st.columns(3)
                 with col_met1:
-                    st.metric("Semestre actual", ciclo_act)
+                    st.metric("Semestre objetivo", f"{sem_objetivo}", delta=f"Cursando sem. {sem_cursado}")
                 with col_met2:
                     st.metric("Materias candidatas", resultado.get("candidatas_count", 0))
                 with col_met3:
                     st.metric("Analizadas inicialmente", ini_count)
 
-                # ── Tabla de candidatas ──
+                # ── Tabla única de candidatas con secciones de color ──
                 candidatas_detalles = resultado.get("candidatas_detalles", [])
                 if candidatas_detalles:
-                    st.subheader("✅ Materias que puedes cursar")
+                    st.subheader("Materias recomendadas para el siguiente semestre")
 
                     df_candidatas = pd.DataFrame(candidatas_detalles)
 
@@ -1032,39 +1034,84 @@ def main():
                             lambda x: ", ".join(x) if isinstance(x, list) and x else "—"
                         )
 
-                    cols_mostrar = ["clave", "nombre", "ciclo", "creditos", "categoria", "prerequisitos"]
-                    cols_existentes = [c for c in cols_mostrar if c in df_candidatas.columns]
-                    df_mostrar = df_candidatas[cols_existentes].rename(columns={
-                        "clave": "Clave",
-                        "nombre": "Nombre",
-                        "ciclo": "Ciclo",
-                        "creditos": "Créditos",
-                        "categoria": "Categoría",
-                        "prerequisitos": "Prerequisitos",
-                    })
+                    _nivel_config = {
+                        1: {"color": "#1565c0", "bg": "#e3f2fd", "titulo": "Materias con prerequisito aprobado", "desc": "Siguiente paso natural en tu avance curricular"},
+                        2: {"color": "#d32f2f", "bg": "#fdecea", "titulo": "Materias reprobadas", "desc": "Necesitas recursarlas para avanzar"},
+                        3: {"color": "#ef6c00", "bg": "#fff3e0", "titulo": "Materias básicas de ciclos anteriores", "desc": "Pendientes de semestres previos, ordenadas por ciclo"},
+                        4: {"color": "#2e7d32", "bg": "#e8f5e9", "titulo": "Asignaturas de elección libre", "desc": "Electivas y preespecialidad disponibles"},
+                        5: {"color": "#757575", "bg": "#f5f5f5", "titulo": "Talleres deportivos y culturales", "desc": "Complementarios"},
+                    }
 
-                    st.dataframe(
-                        df_mostrar,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "Clave": st.column_config.TextColumn(width="small"),
-                            "Nombre": st.column_config.TextColumn(width="medium"),
-                            "Ciclo": st.column_config.NumberColumn(width="small"),
-                            "Créditos": st.column_config.NumberColumn(width="small"),
-                            "Categoría": st.column_config.TextColumn(width="small"),
-                            "Prerequisitos": st.column_config.TextColumn(width="medium"),
-                        }
-                    )
+                    niveles_presentes = sorted(df_candidatas["prioridad"].unique()) if "prioridad" in df_candidatas.columns else []
 
-                    st.divider()
+                    total_creditos = 0
+                    total_basicas = 0
+                    total_optativas = 0
+
+                    # Construir tabla HTML
+                    html = [
+                        '<table style="width:100%; border-collapse:collapse; font-size:14px; font-family: Source Sans Pro, sans-serif;">',
+                        '<thead><tr style="background:#262730; color:#fafafa;">',
+                        '<th style="padding:10px 8px; text-align:left;">Clave</th>',
+                        '<th style="padding:10px 8px; text-align:left;">Nombre</th>',
+                        '<th style="padding:10px 8px; text-align:center;">Ciclo</th>',
+                        '<th style="padding:10px 8px; text-align:center;">Créd.</th>',
+                        '<th style="padding:10px 8px; text-align:left;">Categoría</th>',
+                        '<th style="padding:10px 8px; text-align:left;">Prereqs</th>',
+                        '<th style="padding:10px 8px; text-align:left;">Razón</th>',
+                        '</tr></thead><tbody>',
+                    ]
+
+                    for nivel_num in niveles_presentes:
+                        df_nivel = df_candidatas[df_candidatas["prioridad"] == nivel_num]
+                        if df_nivel.empty:
+                            continue
+
+                        cfg = _nivel_config.get(nivel_num, {"color": "#757575", "bg": "#f5f5f5", "titulo": f"Nivel {nivel_num}", "desc": ""})
+                        n_mat = len(df_nivel)
+                        n_cred = int(df_nivel["creditos"].sum())
+                        total_creditos += n_cred
+                        total_basicas += len(df_nivel[df_nivel["categoria"] == "BASICA"])
+                        total_optativas += len(df_nivel[df_nivel["categoria"] != "BASICA"])
+
+                        # Fila separadora de sección
+                        html.append(
+                            f'<tr style="background:{cfg["color"]}; color:white;">'
+                            f'<td colspan="7" style="padding:10px 8px; font-weight:700; font-size:14px;">'
+                            f'{cfg["titulo"]}  —  {n_mat} materia{"s" if n_mat != 1 else ""} · {n_cred} créditos'
+                            f'<span style="font-weight:400; margin-left:12px; font-size:12px; opacity:0.85;">{cfg["desc"]}</span>'
+                            f'</td></tr>'
+                        )
+
+                        # Filas de materias
+                        for _, row in df_nivel.iterrows():
+                            prereqs = row.get("prerequisitos", "—")
+                            razon = row.get("razon", "")
+                            cat_display = str(row.get("categoria", "")).replace("_", " ").title()
+                            html.append(
+                                f'<tr style="background:{cfg["bg"]}; border-bottom:1px solid #e0e0e0;">'
+                                f'<td style="padding:8px; font-weight:600;">{row["clave"]}</td>'
+                                f'<td style="padding:8px;">{row["nombre"]}</td>'
+                                f'<td style="padding:8px; text-align:center;">{row["ciclo"]}</td>'
+                                f'<td style="padding:8px; text-align:center;">{row["creditos"]}</td>'
+                                f'<td style="padding:8px; font-size:12px;">{cat_display}</td>'
+                                f'<td style="padding:8px; font-size:12px;">{prereqs}</td>'
+                                f'<td style="padding:8px; font-size:12px; font-style:italic;">{razon}</td>'
+                                f'</tr>'
+                            )
+
+                    html.append('</tbody></table>')
+                    st.markdown("".join(html), unsafe_allow_html=True)
+
+                    # Resumen
+                    st.markdown("")
                     col_est1, col_est2, col_est3 = st.columns(3)
                     with col_est1:
-                        st.metric("Créditos totales", int(df_candidatas["creditos"].sum()))
+                        st.metric("Créditos totales", total_creditos)
                     with col_est2:
-                        st.metric("Materias básicas", len(df_candidatas[df_candidatas["categoria"] == "BASICA"]))
+                        st.metric("Materias básicas", total_basicas)
                     with col_est3:
-                        st.metric("Materias optativas", len(df_candidatas[df_candidatas["categoria"] != "BASICA"]))
+                        st.metric("Materias optativas", total_optativas)
                 else:
                     st.info("No se encontraron materias candidatas disponibles en este momento.")
 

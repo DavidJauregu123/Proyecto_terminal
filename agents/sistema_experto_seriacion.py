@@ -875,13 +875,14 @@ def ejecutar_sistema_experto(
     # =========================================================================
     # PASO 2: Determinar ciclo actual
     # =========================================================================
-    ciclo_actual = detectar_ciclo_actual(historial_academico, mapa_curricular)
-    
+    semestre_cursado = detectar_ciclo_actual(historial_academico, mapa_curricular)
+    semestre_objetivo = min(semestre_cursado + 1, 8)
+
     # =========================================================================
-    # PASO 3: Generar candidatas iniciales
+    # PASO 3: Generar candidatas iniciales (usando semestre objetivo)
     # =========================================================================
     candidatas = generar_candidatas_iniciales(
-        ciclo_actual, mapa_curricular, aprobadas, en_curso
+        semestre_objetivo, mapa_curricular, aprobadas, en_curso
     )
     count_iniciales = len(candidatas)
     
@@ -921,29 +922,88 @@ def ejecutar_sistema_experto(
     )
 
     # =========================================================================
-    # PASO 9: Enriquecer resultado
+    # PASO 9: Enriquecer resultado con priorización por niveles
     # =========================================================================
+
+    # Identificar materias reprobadas pendientes (no aprobadas aún)
+    reprobadas_pendientes = set()
+    for mat in historial_academico:
+        c = str(mat.get("clave", "")).strip().upper()
+        est = str(mat.get("estatus", "")).strip().upper()
+        if est == "REPROBADA" and c not in aprobadas:
+            reprobadas_pendientes.add(c)
+
+    # Construir nombre lookup
+    nombre_lookup = {}
+    for m in mapa_curricular:
+        k = str(m.get("clave", "")).strip().upper()
+        nombre_lookup[k] = m.get("nombre", k)
+
     detalles = []
     for clave in sorted(candidatas):
-        clave = str(clave).strip().upper()  # NORMALIZAR
+        clave = str(clave).strip().upper()
         materia_info = next(
             (m for m in mapa_curricular if str(m.get("clave", "")).strip().upper() == clave),
             None
         )
-        
-        if materia_info:
-            requisitos = obtener_prerequisitos(clave, mapa_curricular)
-            detalles.append({
-                "clave": clave,
-                "nombre": materia_info.get("nombre", "Desconocido"),
-                "ciclo": materia_info.get("ciclo", 0),
-                "creditos": materia_info.get("creditos", 0),
-                "categoria": materia_info.get("categoria", ""),
-                "prerequisitos": sorted(list(requisitos))
-            })
+
+        if not materia_info:
+            continue
+
+        requisitos = obtener_prerequisitos(clave, mapa_curricular)
+        categoria = materia_info.get("categoria", "")
+        ciclo = materia_info.get("ciclo", 0)
+
+        # --- Determinar prioridad y razón ---
+        # Nivel 1: Tiene prerequisitos definidos Y todos aprobados Y no es reprobada
+        #          (cadena natural: pasó el prereq → le toca esta)
+        tiene_prereqs = len(requisitos) > 0
+        prereqs_nombres = [f"{r} ({nombre_lookup.get(r, r)})" for r in requisitos]
+
+        if tiene_prereqs and clave not in reprobadas_pendientes:
+            prioridad = 1
+            nivel = "Materias con prerequisito aprobado"
+            razon = f"Prerequisito cumplido: {', '.join(prereqs_nombres)}"
+        elif clave in reprobadas_pendientes:
+            prioridad = 2
+            nivel = "Materias reprobadas"
+            razon = "Reprobada anteriormente, pendiente de recursar"
+        elif categoria == "BASICA":
+            prioridad = 3
+            nivel = "Materias básicas de ciclos anteriores"
+            razon = f"Materia básica pendiente del ciclo {ciclo}"
+        elif categoria in ("ELECCION_LIBRE", "PREESPECIALIDAD"):
+            prioridad = 4
+            nivel = "Asignaturas de elección libre"
+            razon = f"Electiva disponible ({categoria.replace('_', ' ').title()})"
+        elif clave.startswith(("AD", "TA")):
+            prioridad = 5
+            nivel = "Talleres deportivos y culturales"
+            razon = "Taller disponible"
+        else:
+            prioridad = 5
+            nivel = "Asignaturas de elección libre"
+            razon = "Materia disponible"
+
+        detalles.append({
+            "clave": clave,
+            "nombre": materia_info.get("nombre", "Desconocido"),
+            "ciclo": ciclo,
+            "creditos": materia_info.get("creditos", 0),
+            "categoria": categoria,
+            "prerequisitos": sorted(list(requisitos)),
+            "prioridad": prioridad,
+            "nivel": nivel,
+            "razon": razon
+        })
+
+    # Ordenar por prioridad, luego por ciclo, luego por clave
+    detalles.sort(key=lambda d: (d["prioridad"], d["ciclo"], d["clave"]))
     
     return {
-        "ciclo_actual": ciclo_actual,
+        "semestre_cursado": semestre_cursado,
+        "semestre_objetivo": semestre_objetivo,
+        "ciclo_actual": semestre_objetivo,
         "candidatas_count": len(candidatas),
         "candidatas_claves": sorted(list(candidatas)),
         "candidatas_detalles": detalles,
