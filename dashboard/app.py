@@ -12,8 +12,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from parsers import KardexParser, HistorialParser
 from services import AcademicProcessor
-from services.local_database import DatabaseService
-from agents.sistema_experto_seriacion import ejecutar_sistema_experto
+from services.supabase_service import SupabaseService as DatabaseService
+from agents.sistema_experto_seriacion import (
+    ejecutar_sistema_experto,
+    EL_RECOMENDADAS_POR_CICLO,
+    EL_ACUMULADAS_CICLO,
+    PREESP_RECOMENDADAS_POR_CICLO,
+    PREESP_ACUMULADAS_CICLO,
+)
 from config import settings
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
@@ -85,14 +91,9 @@ st.markdown("""
 
 
 def cargar_mapa_curricular() -> dict:
-    """Carga el mapa curricular: session_state > JSON > vacío"""
-    # Si ya fue cargado en esta sesión (via uploader), usarlo directamente
-    if "mapa_curricular" in st.session_state and st.session_state.mapa_curricular:
-        return st.session_state.mapa_curricular
-
-    # Fallback a JSON guardado en disco
+    """Carga el mapa curricular oficial (real_completo, semestres 1-8)."""
     try:
-        mapa_path = Path(__file__).parent.parent / "data" / "mapa_curricular_2021ID.json"
+        mapa_path = Path(__file__).parent.parent / "data" / "mapa_curricular_2021ID_real_completo.json"
         if mapa_path.exists():
             with open(mapa_path, "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -104,10 +105,14 @@ def cargar_mapa_curricular() -> dict:
 
 NOMBRES_CICLO = {
     0: "Co-curricular",
-    1: "Primer Ciclo",
-    2: "Segundo Ciclo",
-    3: "Tercer Ciclo",
-    4: "Cuarto Ciclo",
+    1: "Semestre 1",
+    2: "Semestre 2",
+    3: "Semestre 3",
+    4: "Semestre 4",
+    5: "Semestre 5",
+    6: "Semestre 6",
+    7: "Semestre 7",
+    8: "Semestre 8",
 }
 
 
@@ -148,7 +153,8 @@ def crear_grafica_progreso_ciclo(ciclo: int, progreso: dict) -> go.Figure:
         labels=labels,
         values=values,
         marker=dict(colors=colores),
-        hole=0.4
+        hole=0.4,
+        textinfo="none",
     )])
     
     fig.update_layout(
@@ -158,6 +164,134 @@ def crear_grafica_progreso_ciclo(ciclo: int, progreso: dict) -> go.Figure:
     )
     
     return fig
+
+
+def obtener_materias_por_estatus_ciclo(historial_filtrado_df, mapa_curricular_lista):
+    """
+    Devuelve un dict {ciclo: {estatus_label: [{Clave, Nombre, Créditos, Categoría}]}}
+    para poder mostrar qué materias componen cada segmento de las gráficas.
+    """
+    status_map = {}
+    for _, row in historial_filtrado_df.iterrows():
+        clave = str(row.get("clave", "")).strip().upper()
+        status_map[clave] = row.get("estatus", "")
+
+    result = {}
+    for ciclo in range(1, 9):
+        materias_ciclo = [m for m in mapa_curricular_lista if m.get("ciclo") == ciclo]
+        grupos = {
+            "Finalizadas": [], "En Curso": [], "Recursando": [],
+            "Reprobadas": [], "Pendientes": [],
+        }
+        for m in materias_ciclo:
+            clave = str(m.get("clave", "")).strip().upper()
+            estatus = status_map.get(clave, "")
+            info = {
+                "Clave": clave,
+                "Nombre": m.get("nombre", ""),
+                "Créditos": m.get("creditos", 0),
+                "Categoría": m.get("categoria", ""),
+            }
+            if estatus == "APROBADA":
+                grupos["Finalizadas"].append(info)
+            elif estatus == "EN_CURSO":
+                grupos["En Curso"].append(info)
+            elif estatus == "RECURSANDO":
+                grupos["Recursando"].append(info)
+            elif estatus == "REPROBADA":
+                grupos["Reprobadas"].append(info)
+            else:
+                grupos["Pendientes"].append(info)
+        result[ciclo] = grupos
+    return result
+
+
+def detectar_sabaticos(historial_df):
+    """
+    Detecta semestres sabáticos a partir de los periodos del kardex.
+
+    Periodos normales (hábiles): terminan en 01 (Primavera) o 03 (Otoño).
+    Periodos de vacaciones: terminan en 02 (Verano) o 04 (Invierno).
+
+    Un sabático es un semestre hábil (01 o 03) donde el estudiante
+    no cursó ninguna materia, dentro del rango entre su primer y último
+    semestre registrado.
+
+    Returns:
+        dict con: sabaticos, cantidad, max_permitidos, restantes,
+                  semestres_activos, tiempo_max_años, semestres_max,
+                  periodos_normales_cursados, periodos_vacaciones
+    """
+    base = {
+        "sabaticos": [], "cantidad": 0, "max_permitidos": 3, "restantes": 3,
+        "semestres_activos": 0, "tiempo_max_años": 8.0, "semestres_max": 16,
+        "periodos_normales_cursados": [], "periodos_vacaciones": [],
+    }
+
+    if historial_df.empty or "periodo" not in historial_df.columns:
+        return base
+
+    periodos = set()
+    for p in historial_df["periodo"].dropna().astype(str).tolist():
+        p = p.strip()
+        if len(p) == 6 and p.isdigit():
+            periodos.add(p)
+
+    if not periodos:
+        return base
+
+    # Excluir periodos donde TODAS las materias son BAJA_TEMPORAL (BTT)
+    periodos_btt = set()
+    if "estatus" in historial_df.columns:
+        for p in periodos:
+            materias_periodo = historial_df[historial_df["periodo"].astype(str).str.strip() == p]
+            if not materias_periodo.empty and (materias_periodo["estatus"] == "BAJA_TEMPORAL").all():
+                periodos_btt.add(p)
+    periodos_activos = periodos - periodos_btt
+
+    periodos_normales = sorted(p for p in periodos_activos if p[-2:] in ("01", "03"))
+    periodos_vacaciones = sorted(p for p in periodos_activos if p[-2:] in ("02", "04"))
+
+    if not periodos_normales:
+        return base
+
+    primer_p = periodos_normales[0]
+    ultimo_p = periodos_normales[-1]
+
+    # Generar todos los semestres hábiles esperados entre el primero y el último
+    esperados = []
+    año = int(primer_p[:4])
+    sufijo = int(primer_p[4:])
+    while True:
+        periodo = f"{año:04d}{sufijo:02d}"
+        if periodo > ultimo_p:
+            break
+        esperados.append(periodo)
+        if sufijo == 1:
+            sufijo = 3
+        else:
+            año += 1
+            sufijo = 1
+
+    sabaticos = [p for p in esperados if p not in set(periodos_normales)]
+    cantidad = len(sabaticos)
+    max_permitidos = 3
+    restantes = max(0, max_permitidos - cantidad)
+    semestres_activos = len(periodos_normales)
+    tiempo_max_años = 8.0 + min(cantidad, max_permitidos) * 0.5
+    semestres_max = 16 + min(cantidad, max_permitidos)
+
+    return {
+        "sabaticos": sabaticos,
+        "cantidad": cantidad,
+        "max_permitidos": max_permitidos,
+        "restantes": restantes,
+        "semestres_activos": semestres_activos,
+        "tiempo_max_años": tiempo_max_años,
+        "semestres_max": semestres_max,
+        "periodos_normales_cursados": periodos_normales,
+        "periodos_vacaciones": periodos_vacaciones,
+    }
 
 
 def filtrar_ultimo_estatus(historial_df: pd.DataFrame) -> pd.DataFrame:
@@ -298,15 +432,21 @@ def marcar_recursando(historial_filtrado: pd.DataFrame, historial_completo: pd.D
     return df
 
 
-def calcular_eleccion_libre(historial_df: pd.DataFrame, mapa_curricular: dict) -> dict:
+def calcular_eleccion_libre(historial_df: pd.DataFrame, mapa_curricular) -> dict:
     """
-    Calcula el progreso de materias de elección libre por ciclo.
-    Usa el historial académico como fuente de verdad para identificar materias de elección libre.
-    Reglas:
-    - Ciclo 1: 2 materias de elección libre requeridas
-    - Ciclo 2: 2 materias de elección libre requeridas
-    - Ciclos 3 y 4 combinados: 8 materias totales (incluyendo materias de pre-especialidad NO usada)
+    Calcula el progreso de materias de elección libre por ciclo anual.
+    El mapa_curricular puede ser dict {clave: info} o list [{clave, ...}].
+    Usa semestres 1-8 del real_completo:
+    - Ciclo anual 1: semestres 1-2 → 2 materias de EL requeridas
+    - Ciclo anual 2: semestres 3-4 → 2 materias de EL requeridas
+    - Ciclos anuales 3 y 4 combinados: semestres 5-8 → 8 materias totales
     """
+    # Normalizar mapa a dict {clave: info}
+    if isinstance(mapa_curricular, list):
+        mapa_dict = {m.get("clave", ""): m for m in mapa_curricular if isinstance(m, dict)}
+    else:
+        mapa_dict = mapa_curricular if isinstance(mapa_curricular, dict) else {}
+
     eleccion_libre = {
         1: {"aprobadas": 0, "en_curso": 0, "requeridas": 2, "claves": [], "nombres": []},
         2: {"aprobadas": 0, "en_curso": 0, "requeridas": 2, "claves": [], "nombres": []},
@@ -322,17 +462,15 @@ def calcular_eleccion_libre(historial_df: pd.DataFrame, mapa_curricular: dict) -
         nombre = row.get("nombre", "")
         estatus = row.get("estatus", "")
         
-        if clave in mapa_curricular:
-            categoria = mapa_curricular[clave].get("categoria", "")
-            if categoria in ("PRE_ESPECIALIDAD", "PRE-ESPECIALIDAD") and estatus == "APROBADA":
+        if clave in mapa_dict:
+            categoria = mapa_dict[clave].get("categoria", "")
+            if categoria in ("PRE_ESPECIALIDAD", "PRE-ESPECIALIDAD", "PREESPECIALIDAD") and estatus == "APROBADA":
                 # CORRECCIÓN: Identificación basada en el nombre de la materia desde el historial
                 if "inteligencia" in nombre.lower() and ("negocios" in nombre.lower() or "organizacional" in nombre.lower()):
                     pre_especialidades["IoN"] += 1
                 elif "innovaci" in nombre.lower() and "tic" in nombre.lower():
                     pre_especialidades["ITIC"] += 1
                 # Fallback por código si no hay nombre claro
-                # ID3420-ID3424 = Inteligencia Organizacional y de Negocios
-                # ID3415-ID3419 = Innovación en TIC
                 elif clave in ["ID3420", "ID3421", "ID3422", "ID3423", "ID3424"]:
                     pre_especialidades["IoN"] += 1
                 elif clave in ["ID3415", "ID3416", "ID3417", "ID3418", "ID3419"]:
@@ -347,46 +485,38 @@ def calcular_eleccion_libre(historial_df: pd.DataFrame, mapa_curricular: dict) -
         nombre = row.get("nombre", "")
         estatus = row.get("estatus", "")
         
-        if clave not in mapa_curricular:
+        if clave not in mapa_dict:
             continue
             
-        ciclo = mapa_curricular[clave].get("ciclo", 0)
-        categoria = mapa_curricular[clave].get("categoria", "")
+        ciclo = mapa_dict[clave].get("ciclo", 0)          # semestre 1-8
+        categoria = mapa_dict[clave].get("categoria", "")
         
-        # Caso 1: Materias explícitamente de elección libre según el historial académico
-        if "ELECCI" in categoria.upper() and "LIBRE" in categoria.upper():
-            if ciclo == 1:
-                if estatus == "APROBADA":
-                    eleccion_libre[1]["aprobadas"] += 1
-                elif estatus in ("EN_CURSO", "RECURSANDO"):
-                    eleccion_libre[1]["en_curso"] += 1
-                eleccion_libre[1]["claves"].append(clave)
-                eleccion_libre[1]["nombres"].append(nombre)
-            elif ciclo == 2:
-                if estatus == "APROBADA":
-                    eleccion_libre[2]["aprobadas"] += 1
-                elif estatus in ("EN_CURSO", "RECURSANDO"):
-                    eleccion_libre[2]["en_curso"] += 1
-                eleccion_libre[2]["claves"].append(clave)
-                eleccion_libre[2]["nombres"].append(nombre)
-            elif ciclo in (3, 4):
-                if estatus == "APROBADA":
-                    eleccion_libre["3_y_4"]["aprobadas"] += 1
-                elif estatus in ("EN_CURSO", "RECURSANDO"):
-                    eleccion_libre["3_y_4"]["en_curso"] += 1
-                eleccion_libre["3_y_4"]["claves"].append(clave)
-                eleccion_libre["3_y_4"]["nombres"].append(nombre)
+        # Helper: clasificar en ciclo anual visual
+        def ciclo_anual_de(sem):
+            if sem in (1, 2):
+                return 1
+            elif sem in (3, 4):
+                return 2
+            else:
+                return "3_y_4"
 
-        # Caso 2: Materias de la pre-especialidad NO usada para titular cuentan como elección libre en ciclos 3 y 4
-        elif categoria in ("PRE_ESPECIALIDAD", "PRE-ESPECIALIDAD") and ciclo in (3, 4):
+        # Caso 1: Materias explícitamente de elección libre
+        if "ELECCI" in categoria.upper() and "LIBRE" in categoria.upper():
+            c_anual = ciclo_anual_de(ciclo)
+            if estatus == "APROBADA":
+                eleccion_libre[c_anual]["aprobadas"] += 1
+            elif estatus in ("EN_CURSO", "RECURSANDO"):
+                eleccion_libre[c_anual]["en_curso"] += 1
+            eleccion_libre[c_anual]["claves"].append(clave)
+            eleccion_libre[c_anual]["nombres"].append(nombre)
+
+        # Caso 2: Materias de la pre-especialidad NO usada → cuentan como EL en ciclos 3y4
+        elif categoria in ("PRE_ESPECIALIDAD", "PRE-ESPECIALIDAD", "PREESPECIALIDAD") and ciclo >= 5:
             # Determinar a qué pre-especialidad pertenece
             if "inteligencia" in nombre.lower() and ("negocios" in nombre.lower() or "organizacional" in nombre.lower()):
                 pre_materia = "IoN"
             elif "innovaci" in nombre.lower() and "tic" in nombre.lower():
                 pre_materia = "ITIC"
-            # Fallback por código
-            # ID3420-ID3424 = Inteligencia Organizacional y de Negocios
-            # ID3415-ID3419 = Innovación en TIC
             elif clave in ["ID3420", "ID3421", "ID3422", "ID3423", "ID3424"]:
                 pre_materia = "IoN"
             elif clave in ["ID3415", "ID3416", "ID3417", "ID3418", "ID3419"]:
@@ -406,18 +536,23 @@ def calcular_eleccion_libre(historial_df: pd.DataFrame, mapa_curricular: dict) -
     return eleccion_libre, pre_titulacion, pre_especialidades
 
 
-def calcular_progreso_preespecialidades(historial_df: pd.DataFrame, mapa_curricular: dict) -> dict:
+def calcular_progreso_preespecialidades(historial_df: pd.DataFrame, mapa_curricular) -> dict:
     """
     Calcula el progreso en cada pre-especialidad.
     Cada pre-especialidad necesita 5 materias para completarse.
-    CORRECCIÓN: Usar nombres de materias del historial como fuente de verdad.
+    El mapa_curricular puede ser dict {clave: info} o list [{clave, ...}].
     """
+    # Normalizar mapa a dict {clave: info}
+    if isinstance(mapa_curricular, list):
+        mapa_dict = {m.get("clave", ""): m for m in mapa_curricular if isinstance(m, dict)}
+    else:
+        mapa_dict = mapa_curricular if isinstance(mapa_curricular, dict) else {}
+
     # Identificar materias de pre-especialidad desde el historial
     preespecialidades = {}
     materias_procesadas = {}  # {clave: estatus_mas_reciente}
     
     # Buscar en el historial las materias de pre-especialidad
-    # Primero, obtener el estatus más reciente de cada materia
     for _, row in historial_df.iterrows():
         clave = row.get("clave", "")
         nombre = row.get("nombre", "")
@@ -425,18 +560,16 @@ def calcular_progreso_preespecialidades(historial_df: pd.DataFrame, mapa_curricu
         periodo = row.get("periodo", "")
         
         # Verificar si está en el mapa como PRE-ESPECIALIDAD
-        if clave in mapa_curricular:
-            categoria = mapa_curricular[clave].get("categoria", "")
-            if categoria in ("PRE_ESPECIALIDAD", "PRE-ESPECIALIDAD"):
-                # CORRECCIÓN: Determinar a qué pre-especialidad pertenece por el nombre desde el historial
+        if clave in mapa_dict:
+            categoria = mapa_dict[clave].get("categoria", "")
+            if categoria in ("PRE_ESPECIALIDAD", "PRE-ESPECIALIDAD", "PREESPECIALIDAD"):
+                # Determinar a qué pre-especialidad pertenece por el nombre del historial
                 if "inteligencia" in nombre.lower() and ("negocios" in nombre.lower() or "organizacional" in nombre.lower()):
                     pre_esp = "Inteligencia Organizacional y de Negocios"
                 elif "innovaci" in nombre.lower() and "tic" in nombre.lower():
                     pre_esp = "Innovación en TIC"
                 else:
-                    # Si no podemos determinar por nombre, intentar por código
-                    # ID3420-ID3424 = Inteligencia Organizacional y de Negocios
-                    # ID3415-ID3419 = Innovación en TIC
+                    # Fallback por código
                     if clave in ["ID3420", "ID3421", "ID3422", "ID3423", "ID3424"]:
                         pre_esp = "Inteligencia Organizacional y de Negocios"
                     elif clave in ["ID3415", "ID3416", "ID3417", "ID3418", "ID3419"]:
@@ -601,7 +734,9 @@ def main():
         )
 
         if historial_file is not None:
-            if st.button("🗂️ Procesar Historial Académico", use_container_width=True):
+            # Procesar automáticamente cuando se sube un archivo nuevo.
+            # Se compara el file_id para no reprocesar en cada rerender de Streamlit.
+            if st.session_state.get("_historial_file_id") != historial_file.file_id:
                 try:
                     with st.spinner("Procesando historial académico..."):
                         with open("temp_historial.pdf", "wb") as f:
@@ -617,13 +752,12 @@ def main():
                         if os.path.exists("temp_historial.pdf"):
                             os.remove("temp_historial.pdf")
 
-                        # Guardar mapa en disco y session_state
+                        # Guardar mapa en disco para referencia legacy
                         mapa_path = Path(__file__).parent.parent / "data" / "mapa_curricular_2021ID.json"
                         mapa_path.parent.mkdir(exist_ok=True)
                         with open(mapa_path, "w", encoding="utf-8") as f:
                             json.dump(mapa, f, ensure_ascii=False, indent=2)
 
-                        st.session_state.mapa_curricular = mapa
                         st.session_state.creditos_totales = historial_parser.creditos_totales
                         st.session_state.creditos_acumulados = historial_parser.creditos_acumulados
 
@@ -636,7 +770,11 @@ def main():
                         # Guardar nivel de inglés
                         st.session_state.codigos_ingles_aprobados = historial_parser.codigos_ingles_aprobados
                         st.session_state.nivel_ingles_texto = historial_parser.nivel_ingles_texto
+                        st.session_state.nivel_ingles_aprobado = historial_parser.nivel_ingles_aprobado
                         st.session_state.ingles_completo = historial_parser.ingles_completo
+
+                        # Marcar este archivo como ya procesado
+                        st.session_state._historial_file_id = historial_file.file_id
 
                         n_aprobadas = len(aprobadas)
                         n_total = len(historial_parser.materias)
@@ -747,26 +885,51 @@ def main():
 
     # Datos compartidos entre pestañas
     mapa_curricular = cargar_mapa_curricular()
+    # Normalizar: si es dict {clave: info}, convertir a lista de dicts
+    if isinstance(mapa_curricular, dict):
+        mapa_curricular = [
+            {**info, "clave": str(clave).strip().upper()}
+            for clave, info in mapa_curricular.items()
+            if isinstance(info, dict)
+        ]
     processor = AcademicProcessor(mapa_curricular)
     historial_df = normalizar_ultima_carga(historial_df)
     historial_filtrado = filtrar_ultimo_estatus(historial_df)
     historial_filtrado = marcar_recursando(historial_filtrado, historial_df)
+
+    # Sobrescribir ciclos usando el mapa oficial (semestres 1-8) para todos los DataFrames.
+    # Así se garantiza que historial_df y historial_filtrado usen semestres aunque
+    # el kardex o historial parser hayan asignado ciclos anuales.
+    _mapa_ciclos = {m.get("clave", ""): m.get("ciclo", None) for m in mapa_curricular}
+
+    def _ciclo_oficial(clave):
+        c = _mapa_ciclos.get(str(clave).strip().upper())
+        return int(c) if c is not None else None
+
+    for _df in (historial_df, historial_filtrado):
+        _override = _df["clave"].apply(_ciclo_oficial)
+        _df["ciclo"] = _override.combine_first(_df["ciclo"].astype("float64")).astype("Int64")
+
+    info_sabaticos = detectar_sabaticos(historial_df)
 
     creditos_totales = st.session_state.get("creditos_totales", 404)
     creditos_acumulados = st.session_state.get("creditos_acumulados", datos.total_creditos)
     creditos_faltantes = max(0, creditos_totales - creditos_acumulados)
 
     # ========== PESTAÑAS PRINCIPALES ==========
-    tab_historia_main, tab_experto_main = st.tabs([
+    tab_historia_main, tab_experto_main, tab_mapa_main, tab_pruebas_main = st.tabs([
         "🗂️ Historia Académica",
         "🧠 Sistema Experto",
+        "📋 Mapa Curricular",
+        "🔬 Pruebas",
     ])
 
     with tab_historia_main:
         st.caption("Usa las pestañas inferiores para navegar el historial académico y su progreso.")
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tab1, tab2, tab2b, tab3, tab4 = st.tabs([
             "📋 Resumen General",
             "📈 Progreso por Ciclo",
+            "📅 Progreso por Semestre",
             "📚 Elección Libre y Adicionales",
             "🎓 Pre-Especialidades",
         ])
@@ -775,39 +938,25 @@ def main():
         subtab_candidatas, = st.tabs(["📌 Materias candidatas"])
 
         with subtab_candidatas:
-            st.subheader("🧠 Sistema Experto de Seriación")
-            st.caption("Muestra materias candidatas y recomendadas para el periodo de oferta seleccionado.")
+            st.divider()
 
-            plan_estudios = str(getattr(datos, "plan_estudios", "2021ID") or "2021ID").strip()
-            periodos = obtener_periodos_oferta(plan_estudios)
+            if historial_df.empty:
+                st.info("⚠️ Sube y procesa el **Historial Académico** (Paso 1 en el sidebar) para ver las materias candidatas.")
+            else:
+                # ── Preparar historial para el sistema experto ──
+                plan_estudios = str(getattr(datos, "plan_estudios", "2021ID") or "2021ID").strip()
 
-            col_cfg1, col_cfg2 = st.columns([2, 1])
-            with col_cfg1:
-                if periodos:
-                    periodos_fmt = {p: formatear_periodo(p) for p in periodos}
-                    periodo_sel = st.selectbox(
-                        "Periodo de oferta académica",
-                        options=periodos,
-                        index=len(periodos) - 1,
-                        format_func=lambda p: periodos_fmt.get(str(p), str(p)),
-                        help="Formato: YYYYPP (01 Primavera, 02 Verano, 03 Otoño, 04 Invierno)"
-                    )
-                else:
-                    periodo_sel = None
-                    st.warning("No se detectaron periodos de oferta. Se ejecutará sin filtro de oferta.")
-            with col_cfg2:
-                usar_oferta = st.checkbox(
-                    "Filtrar por oferta",
-                    value=True,
-                    help="Si se desactiva, muestra candidatas sin filtrar por periodo"
-                )
-
-            # Preparar historial APROBADO para el sistema experto
-            historial_aprobado = []
-            if not historial_filtrado.empty:
-                for _, row in historial_filtrado.iterrows():
-                    if str(row.get("estatus", "")).upper() != "APROBADA":
+                historial_aprobado = []
+                for _, row in historial_df.iterrows():
+                    clave = str(row.get("clave", "")).strip().upper()
+                    if not clave:
                         continue
+                    estatus = str(row.get("estatus", "")).upper()
+                    ciclo = row.get("ciclo")
+                    try:
+                        ciclo = int(ciclo) if pd.notna(ciclo) else 1
+                    except Exception:
+                        ciclo = 1
                     cal = row.get("calificacion", 0.0)
                     cred = row.get("creditos", 0)
                     try:
@@ -818,87 +967,200 @@ def main():
                         cred = int(float(cred)) if pd.notna(cred) else 0
                     except Exception:
                         cred = 0
-
                     historial_aprobado.append({
-                        "clave_materia": str(row.get("clave", "")).strip(),
+                        "clave": clave,
+                        "ciclo": ciclo,
+                        "estatus": estatus,
                         "calificacion": cal,
-                        "creditos_obtenidos": cred,
+                        "creditos": cred,
+                        "nombre": str(row.get("nombre", "")).strip(),
+                        "periodo": str(row.get("periodo", "")).strip(),
                     })
 
-            materias_en_curso = []
-            if not historial_filtrado.empty:
-                mask_curso = historial_filtrado["estatus"].isin(["EN_CURSO", "RECURSANDO"])
-                materias_en_curso = historial_filtrado.loc[mask_curso, "clave"].astype(str).str.strip().tolist()
+                # ── Cargar mapa curricular ──
+                mapa_path = Path(__file__).parent.parent / "data" / f"mapa_curricular_{plan_estudios}_real_completo.json"
+                mapa_curricular = None
+                if mapa_path.exists():
+                    try:
+                        with open(mapa_path, "r", encoding="utf-8") as f:
+                            datos_mapa = json.load(f)
+                            if isinstance(datos_mapa, dict):
+                                mapa_curricular = []
+                                for clave, info in datos_mapa.items():
+                                    if isinstance(info, dict):
+                                        info["clave"] = str(clave).strip().upper()
+                                        mapa_curricular.append(info)
+                    except Exception:
+                        pass
 
-            claves_con_reprobacion = set()
-            intentos_por_clave = {}
-            if not historial_df.empty:
-                for _, row in historial_df.iterrows():
-                    clave = str(row.get("clave", "")).strip()
-                    if not clave:
-                        continue
-                    intentos_por_clave[clave] = intentos_por_clave.get(clave, 0) + 1
-                    if str(row.get("estatus", "")).upper() == "REPROBADA":
-                        claves_con_reprobacion.add(clave)
+                # ── Ejecutar sistema experto ──
+                resultado = ejecutar_sistema_experto(
+                    historial_academico=historial_aprobado,
+                    mapa_curricular=mapa_curricular,
+                    plan_estudios=plan_estudios
+                )
 
-            ejecutar = st.button("⚡ Ejecutar Sistema Experto", use_container_width=True)
+                debug_info = resultado.get("debug", {})
+                ciclo_act  = resultado.get("ciclo_actual", 0)
+                esp        = resultado.get("especialidad_detectada") or None
+                elim_a     = debug_info.get("eliminadas_regla_a", 0)
+                elim_b     = debug_info.get("eliminadas_regla_b", 0)
+                elim_c     = debug_info.get("eliminadas_regla_c", 0)
+                elim_d     = debug_info.get("eliminadas_regla_d", 0)
+                elim_e     = debug_info.get("eliminadas_regla_e", 0)
+                ini_count  = debug_info.get("candidatas_iniciales_count", 0)
 
-            if ejecutar:
-                try:
-                    resultado_experto = ejecutar_sistema_experto(
-                        datos_estudiante={
-                            "id": getattr(datos, "matricula", ""),
-                            "nombre": getattr(datos, "nombre", ""),
-                            "promedio": float(getattr(datos, "promedio_general", 0.0) or 0.0),
-                            "total_creditos": int(getattr(datos, "total_creditos", 0) or 0),
-                        },
-                        historial_academico=historial_aprobado,
-                        materias_en_curso=materias_en_curso,
-                        usar_oferta_academica=usar_oferta,
-                        periodo_oferta=periodo_sel,
-                        plan_estudios=plan_estudios,
+                # ── Métricas ──
+                st.subheader("📊 Resultado del Análisis")
+                col_met1, col_met2, col_met3 = st.columns(3)
+                with col_met1:
+                    st.metric("Semestre actual", ciclo_act)
+                with col_met2:
+                    st.metric("Materias candidatas", resultado.get("candidatas_count", 0))
+                with col_met3:
+                    st.metric("Analizadas inicialmente", ini_count)
+
+                # ── Tabla de candidatas ──
+                candidatas_detalles = resultado.get("candidatas_detalles", [])
+                if candidatas_detalles:
+                    st.subheader("✅ Materias que puedes cursar")
+
+                    df_candidatas = pd.DataFrame(candidatas_detalles)
+
+                    if "prerequisitos" in df_candidatas.columns:
+                        df_candidatas["prerequisitos"] = df_candidatas["prerequisitos"].apply(
+                            lambda x: ", ".join(x) if isinstance(x, list) and x else "—"
+                        )
+
+                    cols_mostrar = ["clave", "nombre", "ciclo", "creditos", "categoria", "prerequisitos"]
+                    cols_existentes = [c for c in cols_mostrar if c in df_candidatas.columns]
+                    df_mostrar = df_candidatas[cols_existentes].rename(columns={
+                        "clave": "Clave",
+                        "nombre": "Nombre",
+                        "ciclo": "Ciclo",
+                        "creditos": "Créditos",
+                        "categoria": "Categoría",
+                        "prerequisitos": "Prerequisitos",
+                    })
+
+                    st.dataframe(
+                        df_mostrar,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Clave": st.column_config.TextColumn(width="small"),
+                            "Nombre": st.column_config.TextColumn(width="medium"),
+                            "Ciclo": st.column_config.NumberColumn(width="small"),
+                            "Créditos": st.column_config.NumberColumn(width="small"),
+                            "Categoría": st.column_config.TextColumn(width="small"),
+                            "Prerequisitos": st.column_config.TextColumn(width="medium"),
+                        }
                     )
 
-                    col_m1, col_m2, col_m3 = st.columns(3)
-                    with col_m1:
-                        st.metric("Ciclo recomendado", resultado_experto.get("ciclo_recomendado", "-"))
-                    with col_m2:
-                        st.metric("Materias candidatas", resultado_experto.get("total_materias_recomendadas", 0))
-                    with col_m3:
-                        periodo_resultado = resultado_experto.get("periodo_oferta")
-                        if periodo_resultado:
-                            st.metric("Periodo oferta", formatear_periodo(periodo_resultado))
+                    st.divider()
+                    col_est1, col_est2, col_est3 = st.columns(3)
+                    with col_est1:
+                        st.metric("Créditos totales", int(df_candidatas["creditos"].sum()))
+                    with col_est2:
+                        st.metric("Materias básicas", len(df_candidatas[df_candidatas["categoria"] == "BASICA"]))
+                    with col_est3:
+                        st.metric("Materias optativas", len(df_candidatas[df_candidatas["categoria"] != "BASICA"]))
+                else:
+                    st.info("No se encontraron materias candidatas disponibles en este momento.")
+
+                # ── Explicación de la lógica (debajo de la tabla) ──
+                st.divider()
+                with st.expander("¿Cómo se eligieron estas materias?", expanded=False):
+
+                    lineas = []
+
+                    # 1. Semestre y punto de partida
+                    lineas.append(
+                        f"**Semestre detectado: {ciclo_act}**  \
+\nEl sistema revisaó tu avance semestre por semestre. Para avanzar de semestre "
+                        f"se requiere haber cubierto al menos el 75\xa0% de las materias básicas de ese semestre. "
+                        f"Cumpliste ese umbral en todos los semestres anteriores al {ciclo_act}, por lo que te ubica en ese punto."
+                    )
+
+                    lineas.append(
+                        f"**Punto de partida: {ini_count} materias**  \
+\nSe tomaron como candidatas iniciales todas las materias del semestre {ciclo_act} "
+                        f"y del semestre {ciclo_act + 1} que aún no tienes aprobadas ni en curso."
+                    ) if ciclo_act < 8 else lineas.append(
+                        f"**Punto de partida: {ini_count} materias**  \
+\nSe tomaron como candidatas iniciales todas las materias del semestre {ciclo_act} "
+                        f"que aún no tienes aprobadas ni en curso."
+                    )
+
+                    # 2. Filtros que realmente eliminaron materias
+                    if elim_a > 0:
+                        lineas.append(
+                            f"**Prerequisitos no cumplidos: se eliminaron {elim_a} materia(s)**  \
+\n"
+                            f"Cada una de esas materias requiere que apruebes primero otra u otras que aún tienes pendientes."
+                        )
+                    if elim_b > 0:
+                        lineas.append(
+                            f"**Cadenas de seriación: se eliminaron {elim_b} materia(s)**  \
+\n"
+                            f"Algunas materias forman secuencias (por ejemplo, Cálculo I → II → III). "
+                            f"Si el eslabón previo no está aprobado, la materia más avanzada se descarta."
+                        )
+                    if elim_c > 0:
+                        lineas.append(
+                            f"**Cuota de Elección Libre: se ajustaron {elim_c} materia(s)**  \
+\n"
+                            f"El plan de estudios tiene un número recomendado de materias de Elección Libre por ciclo anual. "
+                            f"Ya alcanzaste esa cuota en uno o más ciclos, por lo que las optativas sobrantes se retiraron."
+                        )
+
+                    # 3. Pre-especialidades
+                    if esp:
+                        if elim_d > 0:
+                            lineas.append(
+                                f"**Pre-especialidad: se eliminaron {elim_d} materia(s) de la otra línea**  \
+\n"
+                                f"Dado que todas tus materias de pre-especialidad aprobadas pertenecen a **{esp}**, "
+                                f"el sistema descartó las materias de la otra especialidad para no desviar tu trayectoria."
+                            )
                         else:
-                            st.metric("Periodo oferta", "N/A")
-
-                    materias = resultado_experto.get("materias_recomendadas", [])
-                    if materias:
-                        df_mat = pd.DataFrame(materias)
-                        df_mat["condicion"] = df_mat["clave"].apply(
-                            lambda clave: "RECURSE" if str(clave).strip() in claves_con_reprobacion else "NUEVA"
-                        )
-                        df_mat["intentos_previos"] = df_mat["clave"].apply(
-                            lambda clave: max(0, intentos_por_clave.get(str(clave).strip(), 0))
-                        )
-                        columnas = [c for c in ["clave", "nombre", "ciclo", "categoria", "creditos"] if c in df_mat.columns]
-                        columnas = ["condicion"] + columnas + ["intentos_previos"]
-
-                        total_recurse = int((df_mat["condicion"] == "RECURSE").sum())
-                        total_nuevas = int((df_mat["condicion"] == "NUEVA").sum())
-                        st.caption(
-                            f"Materias nuevas: {total_nuevas} | "
-                            f"Materias para recursar: {total_recurse}"
-                        )
-                        st.dataframe(df_mat[columnas], use_container_width=True, hide_index=True)
+                            lineas.append(
+                                f"**Pre-especialidad detectada: {esp}**  \
+\n"
+                                f"El sistema identificó que te has enfocado en esta línea, pero no fue necesario eliminar "
+                                f"ninguna materia candidata adicional."
+                            )
                     else:
-                        st.info("No se encontraron materias candidatas para los filtros seleccionados.")
+                        # Verificar si hay avance en ambas o en ninguna
+                        if elim_d == 0 and ini_count > 0:
+                            lineas.append(
+                                "**Pre-especialidades: se muestran materias de ambas líneas**  \n"
+                                "Aún no tienes materias aprobadas exclusivamente en una sola especialidad, "
+                                "por lo que el sistema incluye candidatas de ambas pre-especialidades. "
+                                "Cuando te concentres en una, la otra dejará de aparecer en futuras recomendaciones."
+                            )
 
-                    alertas = resultado_experto.get("alertas", [])
-                    if alertas:
-                        with st.expander("Ver alertas del sistema experto"):
-                            st.dataframe(pd.DataFrame(alertas), use_container_width=True, hide_index=True)
-                except Exception as e:
-                    st.error(f"Error ejecutando sistema experto: {str(e)}")
+                    if elim_e > 0:
+                        lineas.append(
+                            f"**Prácticas de pre-especialidad: se eliminaron {elim_e} practica(s)**  \
+\n"
+                            f"Las prácticas de pre-especialidad requieren que hayas aprobado al menos 3 materias "
+                            f"de esa línea. Aún no se alcanzan esos requisitos."
+                        )
+
+                    # 4. Resultado
+                    final_count = resultado.get("candidatas_count", 0)
+                    lineas.append(
+                        f"**Resultado: {final_count} materia(s) recomendadas**  \
+\n"
+                        f"Las materias de la tabla son las que puedes inscribir ahora mismo según tu historial "
+                        f"y las reglas de seriación de tu plan de estudios."
+                    )
+
+                    for linea in lineas:
+                        st.markdown(linea)
+                        st.markdown("")
+
 
     # ===================================================================
     # PESTAÑA 1: RESUMEN GENERAL
@@ -934,6 +1196,42 @@ def main():
             st.metric("Índice de Reprobación", f"{_indice_reprobacion:.1f}%",
                      help=f"{_mat_reprobadas} reprobadas / {_mat_cursadas} cursadas")
 
+        # ── Semestres sabáticos ──
+        if info_sabaticos["cantidad"] > 0:
+            st.markdown("---")
+            _n_sab = info_sabaticos["cantidad"]
+            _rest = info_sabaticos["restantes"]
+            _color_sab = "#e67e22" if _rest > 0 else "#e74c3c"
+            st.markdown(
+                f'<div style="background:#fff8e1;border-left:4px solid {_color_sab};'
+                f'padding:15px;margin:10px 0;border-radius:5px;color:#000;">'
+                f'<strong>Semestres sab\u00e1ticos detectados: {_n_sab} de 3 permitidos</strong><br>'
+                f'Semestres activos cursados: {info_sabaticos["semestres_activos"]}'
+                f' &nbsp;|&nbsp; Restantes disponibles: {_rest}'
+                f' &nbsp;|&nbsp; Tiempo m\u00e1ximo ajustado: {info_sabaticos["tiempo_max_años"]:.1f} a\u00f1os'
+                f' ({info_sabaticos["semestres_max"]} semestres)'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+            with st.expander("Ver detalle de semestres sabáticos"):
+                _sab_rows = []
+                for p in info_sabaticos["sabaticos"]:
+                    _año = p[:4]
+                    _suf = p[4:]
+                    _temp = {"01": "Primavera", "03": "Otoño"}.get(_suf, p[4:])
+                    _sab_rows.append({"Periodo": p, "Temporada": f"{_temp} {_año}"})
+                st.dataframe(pd.DataFrame(_sab_rows), use_container_width=True, hide_index=True)
+
+                if info_sabaticos["periodos_vacaciones"]:
+                    st.caption("Periodos de vacaciones (verano/invierno) donde cursó materias:")
+                    _vac_rows = []
+                    for p in info_sabaticos["periodos_vacaciones"]:
+                        _año = p[:4]
+                        _suf = p[4:]
+                        _temp = {"02": "Verano", "04": "Invierno"}.get(_suf, p[4:])
+                        _vac_rows.append({"Periodo": p, "Temporada": f"{_temp} {_año}"})
+                    st.dataframe(pd.DataFrame(_vac_rows), use_container_width=True, hide_index=True)
+
         # ── Barra de progreso general ──
         st.markdown("---")
         st.subheader("📊 Progreso de la Carrera")
@@ -946,6 +1244,10 @@ def main():
         from datetime import datetime as _dt
         años_aprox = 0
         semestre_actual = 1
+        _num_sabaticos = info_sabaticos["cantidad"]
+        _max_semestres = info_sabaticos["semestres_max"]      # 16 + sabáticos (máx 3)
+        _max_años = info_sabaticos["tiempo_max_años"]          # 8 + 0.5 * sabáticos
+        semestre_calendario = 1
         try:
             matricula_str = datos.matricula.strip()
             if len(matricula_str) >= 2:
@@ -954,32 +1256,40 @@ def main():
                 _hoy = _dt.now()
                 _meses = (_hoy.year - _inicio.year) * 12 + (_hoy.month - _inicio.month)
                 _meses = max(0, _meses)
-                semestre_actual = max(1, (_meses // 6) + 1)
+                semestre_calendario = max(1, (_meses // 6) + 1)
+                semestre_actual = max(1, semestre_calendario - _num_sabaticos)
                 años_aprox = round(_meses / 12, 1)
         except Exception:
             semestre_actual = max(1, ciclos_unicos * 2)
+            semestre_calendario = semestre_actual + _num_sabaticos
 
+        # Ritmo basado en semestres activos (sin sabáticos)
         _ritmo = creditos_acumulados / semestre_actual if semestre_actual > 0 else 0
-        _sem_proyectados = (creditos_totales / _ritmo) if _ritmo > 0 else 999
+        _sem_activos_proy = (creditos_totales / _ritmo) if _ritmo > 0 else 999
+        _sem_proyectados = _sem_activos_proy + _num_sabaticos  # proyección calendario
 
-        if semestre_actual >= 16 and creditos_acumulados < creditos_totales:
+        if semestre_calendario >= _max_semestres and creditos_acumulados < creditos_totales:
             _color_ritmo = "#7b0000"
-            _etiqueta_ritmo = "&#x26A0; CR&Iacute;TICO TOTAL &mdash; l&iacute;mite de 16 semestres alcanzado"
-        elif _sem_proyectados <= 9:
+            _etiqueta_ritmo = (
+                f"&#x26A0; CR&Iacute;TICO TOTAL &mdash; l&iacute;mite de {_max_semestres} semestres alcanzado"
+            )
+        elif _sem_proyectados <= _max_semestres * 0.5625:
             _color_ritmo = "#27ae60"
-            _etiqueta_ritmo = "En tiempo (&le;4.5 a&ntilde;os)"
-        elif _sem_proyectados <= 11:
+            _etiqueta_ritmo = "En tiempo"
+        elif _sem_proyectados <= _max_semestres * 0.6875:
             _color_ritmo = "#a8e063"
-            _etiqueta_ritmo = "Leve retraso (4.5-5.5 a&ntilde;os)"
-        elif _sem_proyectados <= 13:
+            _etiqueta_ritmo = "Leve retraso"
+        elif _sem_proyectados <= _max_semestres * 0.8125:
             _color_ritmo = "#fdcb6e"
-            _etiqueta_ritmo = "Retraso moderado (5.5-6.5 a&ntilde;os)"
-        elif _sem_proyectados < 16:
+            _etiqueta_ritmo = "Retraso moderado"
+        elif _sem_proyectados < _max_semestres:
             _color_ritmo = "#e17055"
-            _etiqueta_ritmo = "Retraso grave (6.5-8 a&ntilde;os)"
+            _etiqueta_ritmo = "Retraso grave"
         else:
             _color_ritmo = "#d63031"
-            _etiqueta_ritmo = "CR&Iacute;TICO &mdash; proyecci&oacute;n supera el l&iacute;mite de 16 semestres"
+            _etiqueta_ritmo = (
+                f"CR&Iacute;TICO &mdash; proyecci&oacute;n supera el l&iacute;mite de {_max_semestres} semestres"
+            )
 
         _fill_pct = min(porcentaje_creditos, 100.0)
         _inner = (
@@ -1000,14 +1310,21 @@ def main():
 
         _ritmo_fmt = f"{_ritmo:.1f}" if _ritmo > 0 else "—"
         _sem_proy_fmt = f"{_sem_proyectados:.0f}" if _sem_proyectados < 999 else "N/A"
+        _sab_badge = ""
+        if _num_sabaticos > 0:
+            _sab_badge = (
+                f' &nbsp;|&nbsp; <span style="color:#e67e22;">Sab\u00e1ticos: {_num_sabaticos}/3'
+                f' &nbsp;&bull;&nbsp; L\u00edmite: {_max_años:.1f} a\u00f1os ({_max_semestres} sem)</span>'
+            )
         _barra_html = (
             '<div style="background:#f7f7f7;border:1.5px solid #d0d0d0;border-radius:10px;'
             'padding:12px 14px;margin-bottom:8px;">'
             '<div style="font-size:13px;color:#555;margin-bottom:8px;font-weight:600;">'
             f'Progreso general'
             f' &nbsp;|&nbsp; {creditos_acumulados}/{creditos_totales} cr\u00e9ditos'
-            f' &nbsp;|&nbsp; Semestre {semestre_actual} ({años_aprox} a\u00f1os)'
-            f' &nbsp;|&nbsp; Ritmo: {_ritmo_fmt} cr/sem &nbsp;&bull;&nbsp; Proyecci\u00f3n: {_sem_proy_fmt} semestres'
+            f' &nbsp;|&nbsp; Sem. activo {semestre_actual} ({años_aprox} a\u00f1os)'
+            f' &nbsp;|&nbsp; Ritmo: {_ritmo_fmt} cr/sem &nbsp;&bull;&nbsp; Proyecci\u00f3n: {_sem_proy_fmt} sem'
+            f'{_sab_badge}'
             '</div>'
             '<div style="position:relative;width:100%;height:72px;background:#e0e0e0;'
             'border-radius:6px;overflow:hidden;">'
@@ -1021,7 +1338,7 @@ def main():
             '<span style="color:#a8e063;font-weight:bold;">&#9632;</span> 4.5-5.5 &nbsp;'
             '<span style="color:#fdcb6e;font-weight:bold;">&#9632;</span> 5.5-6.5 &nbsp;'
             '<span style="color:#e17055;font-weight:bold;">&#9632;</span> 6.5-8 &nbsp;'
-            '<span style="color:#d63031;font-weight:bold;">&#9632;</span> &ge;16 sem &nbsp;'
+            f'<span style="color:#d63031;font-weight:bold;">&#9632;</span> &ge;{_max_semestres} sem &nbsp;'
             '<span style="color:#7b0000;font-weight:bold;">&#9632;</span> L&iacute;mite alcanzado'
             '</div></div>'
         )
@@ -1058,44 +1375,81 @@ def main():
     # PESTAÑA 2: PROGRESO POR CICLO
     # ===================================================================
     with tab2:
-        st.header("📈 Progreso por Ciclo")
+        st.header("📈 Progreso por Ciclo Anual")
+        st.caption("Resumen agregado por ciclo anual (cada ciclo anual agrupa 2 semestres). Los ciclos 3 y 4 se muestran juntos.")
 
         try:
             progreso_ciclos = processor.calcular_progreso_por_ciclo(historial_filtrado)
-            ciclos_validos = sorted(c for c in progreso_ciclos.keys() if 1 <= c <= 4)
+            materias_por_estatus = obtener_materias_por_estatus_ciclo(historial_filtrado, mapa_curricular)
 
-            if ciclos_validos:
-                cols = st.columns(4)
-                for ciclo in range(1, 5):
-                    with cols[ciclo - 1]:
-                        if ciclo in progreso_ciclos:
-                            progreso = progreso_ciclos[ciclo]
-                            fig = crear_grafica_progreso_ciclo(ciclo, {
-                                "finalizadas": progreso.finalizadas,
-                                "en_curso": progreso.en_curso,
-                                "recursando": progreso.recursando,
-                                "reprobadas": progreso.reprobadas,
-                                "pendientes": progreso.pendientes
-                            })
-                            st.plotly_chart(fig, use_container_width=True)
-                            cursadas = progreso.total - progreso.pendientes
-                            lineas = [
-                                f"<strong>{progreso.porcentaje:.1f}% Completado</strong>",
-                                f"✅ Finalizadas: {progreso.finalizadas}/{cursadas}",
-                                f"⏳ En Curso: {progreso.en_curso}/{cursadas}",
-                            ]
-                            if progreso.recursando > 0:
-                                lineas.append(f"🟠 Recursando: {progreso.recursando}/{cursadas}")
-                            lineas.append(f"❌ Reprobadas: {progreso.reprobadas}/{cursadas}")
-                            lineas.append(f"⚪ Pendientes: {progreso.pendientes}")
-                            contenido = "<br>".join(lineas)
-                            st.markdown(f"<div class='metric-box'>{contenido}</div>", unsafe_allow_html=True)
-                        else:
-                            st.info(f"Ciclo {ciclo}: Sin datos")
-            else:
-                st.info("No hay datos de progreso por ciclo.")
+            def _agrupar_ciclos_anuales(progreso_ciclos, sems):
+                """Suma los ProgresoCiclo de los semestres indicados."""
+                fin = en_c = rec = rep = pend = tot = 0
+                for s in sems:
+                    if s in progreso_ciclos:
+                        p = progreso_ciclos[s]
+                        fin  += p.finalizadas
+                        en_c += p.en_curso
+                        rec  += p.recursando
+                        rep  += p.reprobadas
+                        pend += p.pendientes
+                        tot  += p.total
+                pct = (fin / (tot - pend) * 100) if (tot - pend) > 0 else 0
+                return {"finalizadas": fin, "en_curso": en_c, "recursando": rec,
+                        "reprobadas": rep, "pendientes": pend, "total": tot, "porcentaje": pct}
+
+            grupos_anuales = [
+                ("Ciclo Anual 1\n(Sems 1–2)", [1, 2]),
+                ("Ciclo Anual 2\n(Sems 3–4)", [3, 4]),
+                ("Ciclos Anuales 3 y 4\n(Sems 5–8)", [5, 6, 7, 8]),
+            ]
+
+            cols_ca = st.columns(3)
+            for col, (nombre_ca, sems_ca) in zip(cols_ca, grupos_anuales):
+                datos_ca = _agrupar_ciclos_anuales(progreso_ciclos, sems_ca)
+                with col:
+                    st.subheader(nombre_ca.replace("\n", " "))
+                    fig_ca = go.Figure(data=[go.Pie(
+                        labels=["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"],
+                        values=[datos_ca["finalizadas"], datos_ca["en_curso"],
+                                datos_ca["recursando"], datos_ca["reprobadas"], datos_ca["pendientes"]],
+                        marker=dict(colors=["#28a745", "#ffc107", "#ff8c00", "#dc3545", "#6c757d"]),
+                        hole=0.45,
+                        textinfo="none",
+                    )])
+                    fig_ca.update_layout(showlegend=True, height=380,
+                                         margin=dict(t=30, b=10, l=10, r=10))
+                    st.plotly_chart(fig_ca, use_container_width=True)
+                    cursadas_ca = datos_ca["total"] - datos_ca["pendientes"]
+                    lineas_ca = [f"<strong>{datos_ca['porcentaje']:.1f}% Completado</strong>",
+                                 f"✅ Finalizadas: {datos_ca['finalizadas']}/{cursadas_ca}",
+                                 f"⏳ En Curso: {datos_ca['en_curso']}/{cursadas_ca}"]
+                    if datos_ca["recursando"] > 0:
+                        lineas_ca.append(f"🟠 Recursando: {datos_ca['recursando']}/{cursadas_ca}")
+                    lineas_ca.append(f"❌ Reprobadas: {datos_ca['reprobadas']}/{cursadas_ca}")
+                    lineas_ca.append(f"⚪ Pendientes: {datos_ca['pendientes']}")
+                    st.markdown(f"<div class='metric-box'>{'<br>'.join(lineas_ca)}</div>",
+                                unsafe_allow_html=True)
+
+                    # Lista de materias por segmento del ciclo anual
+                    _mat_ca = {}
+                    for _s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"]:
+                        _mat_ca[_s] = sum([materias_por_estatus.get(s, {}).get(_s, []) for s in sems_ca], [])
+                    _opc_ca = [s for s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"] if _mat_ca.get(s)]
+                    if _opc_ca:
+                        _total_ca = sum(len(_mat_ca[s]) for s in _opc_ca)
+                        with st.expander(f"Ver materias ({_total_ca})"):
+                            _sel_ca = st.selectbox(
+                                "Filtrar por:", _opc_ca,
+                                key=f"sel_ca_{'_'.join(map(str, sems_ca))}"
+                            )
+                            st.dataframe(
+                                pd.DataFrame(_mat_ca[_sel_ca]),
+                                use_container_width=True, hide_index=True
+                            )
+
         except Exception as e:
-            st.warning(f"Error al calcular progreso: {str(e)}")
+            st.warning(f"Error al calcular progreso por ciclo anual: {str(e)}")
 
         # ── Tabla de historial por ciclo ──
         st.markdown("---")
@@ -1154,6 +1508,98 @@ def main():
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     # ===================================================================
+    # PESTAÑA 2B: PROGRESO POR SEMESTRE
+    # ===================================================================
+    with tab2b:
+        st.header("📅 Progreso por Semestre")
+        st.caption("Progreso individual de cada semestre (1-8) del plan de estudios.")
+
+        try:
+            progreso_ciclos = processor.calcular_progreso_por_ciclo(historial_filtrado)
+            materias_por_estatus = obtener_materias_por_estatus_ciclo(historial_filtrado, mapa_curricular)
+            ciclos_validos = sorted(c for c in progreso_ciclos.keys() if 1 <= c <= 8)
+
+            if ciclos_validos:
+                st.caption("**Semestres 1–4**")
+                cols_fila1 = st.columns(4)
+                for i, ciclo in enumerate(range(1, 5)):
+                    with cols_fila1[i]:
+                        if ciclo in progreso_ciclos:
+                            progreso = progreso_ciclos[ciclo]
+                            fig = crear_grafica_progreso_ciclo(ciclo, {
+                                "finalizadas": progreso.finalizadas,
+                                "en_curso": progreso.en_curso,
+                                "recursando": progreso.recursando,
+                                "reprobadas": progreso.reprobadas,
+                                "pendientes": progreso.pendientes
+                            })
+                            st.plotly_chart(fig, use_container_width=True)
+                            cursadas = progreso.total - progreso.pendientes
+                            lineas = [
+                                f"<strong>{progreso.porcentaje:.1f}% Completado</strong>",
+                                f"✅ Finalizadas: {progreso.finalizadas}/{cursadas}",
+                                f"⏳ En Curso: {progreso.en_curso}/{cursadas}",
+                            ]
+                            if progreso.recursando > 0:
+                                lineas.append(f"🟠 Recursando: {progreso.recursando}/{cursadas}")
+                            lineas.append(f"❌ Reprobadas: {progreso.reprobadas}/{cursadas}")
+                            lineas.append(f"⚪ Pendientes: {progreso.pendientes}")
+                            st.markdown(f"<div class='metric-box'>{'<br>'.join(lineas)}</div>",
+                                        unsafe_allow_html=True)
+
+                            _mat_sem = materias_por_estatus.get(ciclo, {})
+                            _opc_sem = [s for s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"] if _mat_sem.get(s)]
+                            if _opc_sem:
+                                _total_sem = sum(len(_mat_sem[s]) for s in _opc_sem)
+                                with st.expander(f"Ver materias ({_total_sem})"):
+                                    _sel_sem = st.selectbox("Filtrar por:", _opc_sem, key=f"sel_sem_{ciclo}")
+                                    st.dataframe(pd.DataFrame(_mat_sem[_sel_sem]), use_container_width=True, hide_index=True)
+                        else:
+                            st.info(f"Sem. {ciclo}: Sin datos")
+
+                st.markdown("---")
+                st.caption("**Semestres 5–8**")
+                cols_fila2 = st.columns(4)
+                for i, ciclo in enumerate(range(5, 9)):
+                    with cols_fila2[i]:
+                        if ciclo in progreso_ciclos:
+                            progreso = progreso_ciclos[ciclo]
+                            fig = crear_grafica_progreso_ciclo(ciclo, {
+                                "finalizadas": progreso.finalizadas,
+                                "en_curso": progreso.en_curso,
+                                "recursando": progreso.recursando,
+                                "reprobadas": progreso.reprobadas,
+                                "pendientes": progreso.pendientes
+                            })
+                            st.plotly_chart(fig, use_container_width=True)
+                            cursadas = progreso.total - progreso.pendientes
+                            lineas = [
+                                f"<strong>{progreso.porcentaje:.1f}% Completado</strong>",
+                                f"✅ Finalizadas: {progreso.finalizadas}/{cursadas}",
+                                f"⏳ En Curso: {progreso.en_curso}/{cursadas}",
+                            ]
+                            if progreso.recursando > 0:
+                                lineas.append(f"🟠 Recursando: {progreso.recursando}/{cursadas}")
+                            lineas.append(f"❌ Reprobadas: {progreso.reprobadas}/{cursadas}")
+                            lineas.append(f"⚪ Pendientes: {progreso.pendientes}")
+                            st.markdown(f"<div class='metric-box'>{'<br>'.join(lineas)}</div>",
+                                        unsafe_allow_html=True)
+
+                            _mat_sem2 = materias_por_estatus.get(ciclo, {})
+                            _opc_sem2 = [s for s in ["Finalizadas", "En Curso", "Recursando", "Reprobadas", "Pendientes"] if _mat_sem2.get(s)]
+                            if _opc_sem2:
+                                _total_sem2 = sum(len(_mat_sem2[s]) for s in _opc_sem2)
+                                with st.expander(f"Ver materias ({_total_sem2})"):
+                                    _sel_sem2 = st.selectbox("Filtrar por:", _opc_sem2, key=f"sel_sem2_{ciclo}")
+                                    st.dataframe(pd.DataFrame(_mat_sem2[_sel_sem2]), use_container_width=True, hide_index=True)
+                        else:
+                            st.info(f"Sem. {ciclo}: Sin datos")
+            else:
+                st.info("No hay datos de progreso por semestre.")
+        except Exception as e:
+            st.warning(f"Error al calcular progreso por semestre: {str(e)}")
+
+    # ===================================================================
     # PESTAÑA 3: ELECCIÓN LIBRE Y ADICIONALES
     # ===================================================================
     with tab3:
@@ -1178,6 +1624,9 @@ def main():
                     📚 Faltan: {max(0, el1["requeridas"] - el1["aprobadas"])} materias
                 </div>
                 """, unsafe_allow_html=True)
+                if el1["claves"]:
+                    with st.expander(f"Ver materias ({len(el1['claves'])})"):
+                        st.dataframe(pd.DataFrame({"Clave": el1["claves"], "Nombre": el1["nombres"]}), use_container_width=True, hide_index=True)
 
             with col_el2:
                 st.subheader("📗 Ciclo 2")
@@ -1192,6 +1641,9 @@ def main():
                     📚 Faltan: {max(0, el2["requeridas"] - el2["aprobadas"])} materias
                 </div>
                 """, unsafe_allow_html=True)
+                if el2["claves"]:
+                    with st.expander(f"Ver materias ({len(el2['claves'])})"):
+                        st.dataframe(pd.DataFrame({"Clave": el2["claves"], "Nombre": el2["nombres"]}), use_container_width=True, hide_index=True)
 
             with col_el3:
                 st.subheader("📙 Ciclos 3 y 4")
@@ -1207,6 +1659,9 @@ def main():
                     <em style="font-size: 0.85em;">Pre-especialidad de titulación: {pre_titulacion}</em>
                 </div>
                 """, unsafe_allow_html=True)
+                if el34["claves"]:
+                    with st.expander(f"Ver materias ({len(el34['claves'])})"):
+                        st.dataframe(pd.DataFrame({"Clave": el34["claves"], "Nombre": el34["nombres"]}), use_container_width=True, hide_index=True)
 
             if pre_especialidades_count["IoN"] < 5 or pre_especialidades_count["ITIC"] < 5:
                 st.info("💡 **Consejo**: Materias de la pre-especialidad no completada pueden contar como elección libre en Ciclos 3 y 4")
@@ -1268,13 +1723,9 @@ def main():
         ]
 
         nivel_historial = st.session_state.get("nivel_ingles_texto", "")
-        nivel_num = 0
-        # Obtener nivel numérico del historial
-        from parsers.historial_parser import HistorialParser as _HP
-        for entry in _HP.CADENA_INGLES:
-            for nombre_n in entry["nombres"]:
-                if nivel_historial and nombre_n in nivel_historial.lower().replace("inglés", "").replace("ingles", "").strip():
-                    nivel_num = max(nivel_num, entry["nivel"])
+        # Usar el número de nivel directamente (guardado desde el parser, evita
+        # problemas de codificación NFD/NFC al recomparar texto del PDF)
+        nivel_num = st.session_state.get("nivel_ingles_aprobado", 0)
 
         # Buscar estado de cada nivel en el kardex
         ingles_rows = []
@@ -1376,10 +1827,472 @@ def main():
                             📚 Faltan: {max(0, 5 - aprobadas)} materias
                         </div>
                         """, unsafe_allow_html=True)
+
+                        # Lista de materias de esta pre-especialidad
+                        if datos_pre.get("claves"):
+                            _mapa_dict_pre = {str(m.get("clave", "")).upper(): m for m in mapa_curricular}
+                            _status_pre = {}
+                            for _, _r in historial_filtrado.iterrows():
+                                _status_pre[str(_r.get("clave", "")).upper()] = _r.get("estatus", "")
+                            _filas_pre = []
+                            for _cl in datos_pre["claves"]:
+                                _mi = _mapa_dict_pre.get(_cl, {})
+                                _filas_pre.append({
+                                    "Clave": _cl,
+                                    "Nombre": _mi.get("nombre", ""),
+                                    "Estado": _status_pre.get(_cl, "PENDIENTE"),
+                                })
+                            with st.expander(f"Ver materias ({len(_filas_pre)})"):
+                                st.dataframe(pd.DataFrame(_filas_pre), use_container_width=True, hide_index=True)
             else:
                 st.info("No se detectaron materias de pre-especialidad en el historial.")
         except Exception as e:
             st.warning(f"Error al calcular pre-especialidades: {str(e)}")
+
+
+    # ===================================================================
+    # PESTAÑA MAPA CURRICULAR: Esquema por semestre
+    # ===================================================================
+    with tab_mapa_main:
+        st.header("📋 Mapa Curricular por Semestre")
+        st.caption("Esquema oficial del plan 2021ID. Las materias de tu historial se marcan según su estatus.")
+
+        # Construir sets de estatus del estudiante
+        if not historial_filtrado.empty:
+            _aprobadas_mapa = set(
+                historial_filtrado[historial_filtrado["estatus"] == "APROBADA"]["clave"].str.upper()
+            )
+            _en_curso_mapa = set(
+                historial_filtrado[historial_filtrado["estatus"].isin(["EN_CURSO", "RECURSANDO"])]["clave"].str.upper()
+            )
+            _reprobadas_mapa = set(
+                historial_filtrado[
+                    (historial_filtrado["estatus"] == "REPROBADA") &
+                    (~historial_filtrado["clave"].str.upper().isin(_aprobadas_mapa))
+                ]["clave"].str.upper()
+            )
+        else:
+            _aprobadas_mapa = _en_curso_mapa = _reprobadas_mapa = set()
+
+        def _badge_materia(clave, nombre, creditos, categoria):
+            """Devuelve HTML de una tarjeta de materia con color según estatus."""
+            c = str(clave).strip().upper()
+            if c in _aprobadas_mapa:
+                bg, border, icon = "#d1fae5", "#10b981", "✅"
+            elif c in _en_curso_mapa:
+                bg, border, icon = "#dbeafe", "#3b82f6", "🔵"
+            elif c in _reprobadas_mapa:
+                bg, border, icon = "#fee2e2", "#ef4444", "❌"
+            else:
+                bg, border, icon = "#f9fafb", "#d1d5db", "⬜"
+
+            cat_colors = {
+                "BASICA": "#6366f1",
+                "ELECCION_LIBRE": "#f59e0b",
+                "PREESPECIALIDAD": "#8b5cf6",
+            }
+            cat_label = {
+                "BASICA": "Básica",
+                "ELECCION_LIBRE": "EL",
+                "PREESPECIALIDAD": "Preesp",
+            }
+            cat_key = str(categoria).upper()
+            cat_c = cat_colors.get(cat_key, "#9ca3af")
+            cat_l = cat_label.get(cat_key, categoria)
+
+            return (
+                f'<div style="background:{bg};border:2px solid {border};border-radius:8px;'
+                f'padding:8px 10px;margin:4px 0;font-size:0.78rem;line-height:1.4;">'
+                f'<span style="font-weight:700;color:#1f2937;">{icon} {clave}</span>'
+                f'<span style="float:right;background:{cat_c};color:#fff;border-radius:4px;'
+                f'padding:1px 6px;font-size:0.68rem;">{cat_l}</span><br>'
+                f'<span style="color:#374151;">{nombre}</span><br>'
+                f'<span style="color:#6b7280;font-size:0.7rem;">{creditos} cr.</span>'
+                f'</div>'
+            )
+
+        # Leyenda
+        st.markdown(
+            '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:0.8rem;">'
+            '<span>✅ Aprobada</span>'
+            '<span>🔵 En curso</span>'
+            '<span>❌ Reprobada</span>'
+            '<span>⬜ Pendiente</span>'
+            '<span style="background:#6366f1;color:#fff;border-radius:4px;padding:1px 8px;">Básica</span>'
+            '<span style="background:#f59e0b;color:#fff;border-radius:4px;padding:1px 8px;">EL</span>'
+            '<span style="background:#8b5cf6;color:#fff;border-radius:4px;padding:1px 8px;">Preesp</span>'
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+        # Agrupar mapa por semestre
+        _mapa_por_sem = {}
+        for _m in mapa_curricular:
+            _sem = _m.get("ciclo", 0)
+            _mapa_por_sem.setdefault(_sem, []).append(_m)
+
+        SEMESTRES = [s for s in range(1, 9) if s in _mapa_por_sem]
+
+        # Mostrar de 2 en 2 semestres por fila
+        for fila_idx in range(0, len(SEMESTRES), 2):
+            par = SEMESTRES[fila_idx:fila_idx + 2]
+            cols = st.columns(len(par))
+            for col, sem in zip(cols, par):
+                anual = (sem + 1) // 2
+                with col:
+                    st.markdown(
+                        f'<div style="background:#e0e7ff;border-radius:8px;padding:6px 12px;'
+                        f'margin-bottom:8px;font-weight:700;font-size:0.9rem;">'
+                        f'Semestre {sem} <span style="font-weight:400;color:#4f46e5;">'
+                        f'(Ciclo anual {anual})</span></div>',
+                        unsafe_allow_html=True
+                    )
+                    materias_sem = sorted(
+                        _mapa_por_sem.get(sem, []),
+                        key=lambda x: (x.get("categoria", ""), x.get("clave", ""))
+                    )
+                    html_cards = "".join(
+                        _badge_materia(
+                            m.get("clave", ""),
+                            m.get("nombre", ""),
+                            m.get("creditos", 0),
+                            m.get("categoria", "")
+                        )
+                        for m in materias_sem
+                    )
+                    st.markdown(html_cards, unsafe_allow_html=True)
+            st.divider()
+
+        # ---------------------------------------------------------------
+        # ANÁLISIS DE AVANCE POR SEMESTRE
+        # ---------------------------------------------------------------
+        st.subheader("📊 Análisis de avance por semestre")
+        st.caption(
+            "Se calcula el porcentaje de avance de cada semestre con la misma lógica que "
+            "usa el sistema experto para determinar el semestre actual. "
+            "Un semestre se considera superado cuando el avance es ≥ 75%."
+        )
+
+        # Construir sets de claves por categoría
+        _mapa_lista = mapa_curricular if isinstance(mapa_curricular, list) else []
+        _aprobadas_anal  = _aprobadas_mapa
+        _en_curso_anal   = _en_curso_mapa
+        _en_contacto_anal = _aprobadas_anal | _en_curso_anal
+
+        # Separar EL por ciclo del mapa (no por corte numérico global)
+        _el_plan_early = {
+            str(m.get("clave", "")).strip().upper()
+            for m in _mapa_lista
+            if m.get("categoria") == "ELECCION_LIBRE" and m.get("ciclo", 0) <= 4
+        }
+        _el_plan_late = {
+            str(m.get("clave", "")).strip().upper()
+            for m in _mapa_lista
+            if m.get("categoria") == "ELECCION_LIBRE" and m.get("ciclo", 0) >= 5
+        }
+        _preesp_plan = {
+            str(m.get("clave", "")).strip().upper()
+            for m in _mapa_lista if m.get("categoria") == "PREESPECIALIDAD"
+        }
+        _el_total_early_anal = len(_el_plan_early & _en_contacto_anal)
+        _el_total_late_anal  = len(_el_plan_late  & _en_contacto_anal)
+        _preesp_total_anal   = len(_preesp_plan   & _en_contacto_anal)
+
+        filas_avance = []
+        for _sem in range(1, 9):
+            _mats_sem = [m for m in _mapa_lista if m.get("ciclo") == _sem]
+            if not _mats_sem:
+                continue
+
+            _claves_sem = {str(m.get("clave", "")).strip().upper() for m in _mats_sem}
+            _tiene_contacto = bool(_claves_sem & _en_contacto_anal)
+
+            # Básicas del semestre (sin PID)
+            _basicas_sem = {
+                str(m.get("clave", "")).strip().upper()
+                for m in _mats_sem
+                if m.get("categoria") == "BASICA"
+                and not str(m.get("clave", "")).strip().upper().startswith("PID")
+            }
+            _cursadas_basicas = len(_basicas_sem & _en_contacto_anal)
+            _total_basicas = len(_basicas_sem)
+
+            # Crédito EL: sems 1-4 simple (1 por sem, sin carry-over),
+            # sems 5-8 acumulativo usando solo el excedente (late)
+            if _sem <= 4:
+                _el_credit = min(_el_total_early_anal, _sem) - min(_el_total_early_anal, _sem - 1)
+                _el_recom  = 1
+            else:
+                _el_acum_prev = EL_ACUMULADAS_CICLO.get(_sem - 1, 0)
+                _el_acum_curr = EL_ACUMULADAS_CICLO.get(_sem, 0)
+                _el_credit    = min(_el_total_late_anal, _el_acum_curr) - min(_el_total_late_anal, _el_acum_prev)
+                _el_recom     = EL_RECOMENDADAS_POR_CICLO.get(_sem, 0)
+
+            # Crédito PREESP acumulativo
+            _preesp_acum_prev = PREESP_ACUMULADAS_CICLO.get(_sem - 1, 0)
+            _preesp_acum_curr = PREESP_ACUMULADAS_CICLO.get(_sem, 0)
+            _preesp_credit    = min(_preesp_total_anal, _preesp_acum_curr) - min(_preesp_total_anal, _preesp_acum_prev)
+            _preesp_recom     = PREESP_RECOMENDADAS_POR_CICLO.get(_sem, 0)
+
+            _total_esperado  = _total_basicas + _el_recom + _preesp_recom
+            _total_cursado   = _cursadas_basicas + _el_credit + _preesp_credit
+            _porcentaje      = (_total_cursado / _total_esperado * 100) if _total_esperado > 0 else 0
+
+            if not _tiene_contacto:
+                _estado = "⬜ No iniciado"
+            elif _porcentaje >= 75:
+                _estado = "✅ Superado"
+            else:
+                _estado = "🔄 En curso"
+
+            filas_avance.append({
+                "Semestre": _sem,
+                "Básicas cursadas": f"{_cursadas_basicas} / {_total_basicas}",
+                "EL (crédito / recomendadas)": f"{_el_credit} / {_el_recom}",
+                "Preesp (crédito / recomendadas)": f"{_preesp_credit} / {_preesp_recom}",
+                "Total (cursado / esperado)": f"{_total_cursado} / {_total_esperado}",
+                "Avance": round(_porcentaje, 1),
+                "Estado": _estado,
+            })
+
+        if filas_avance:
+            df_avance = pd.DataFrame(filas_avance)
+
+            def _color_avance(row):
+                pct = row["Avance"]
+                estado = row["Estado"]
+                if estado == "⬜ No iniciado":
+                    return [""] * len(row)
+                elif pct >= 75:
+                    return ["background-color: #d1fae5"] * len(row)
+                elif pct >= 50:
+                    return ["background-color: #fef3c7"] * len(row)
+                else:
+                    return ["background-color: #fee2e2"] * len(row)
+
+            st.dataframe(
+                df_avance.style
+                    .apply(_color_avance, axis=1)
+                    .format({"Avance": "{:.1f}%"}),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.markdown(
+                "**Interpretación:** "
+                "🟢 Verde = semestre superado (≥ 75%) · "
+                "🟡 Amarillo = en progreso (50–74%) · "
+                "🔴 Rojo = por debajo del umbral (< 50%) · "
+                "⬜ Gris = no iniciado."
+            )
+            st.info(
+                "ℹ️ El avance incluye: **Básicas** del semestre + **crédito acumulativo de Elección Libre** "
+                "(excedentes de semestres anteriores se transfieren) + **crédito acumulativo de Preespecialidad** "
+                "(ídem). Las materias PID (Prácticas Profesionales) no se cuentan aquí."
+            )
+
+        # ---------------------------------------------------------------
+        # TABLA DE VERIFICACIÓN: materias cargadas reales por semestre
+        # ---------------------------------------------------------------
+        st.subheader("🔍 Verificación: materias cargadas por semestre")
+        st.caption(
+            "Conteo real de materias que el alumno tiene en contacto (aprobadas, en curso o recursando) "
+            "por semestre, sin ningún criterio acumulativo. Sirve para verificar que los datos se registran correctamente."
+        )
+
+        filas_verif = []
+        _el_acum_real    = 0  # acumulado real de EL del alumno desde sem 5
+        _preesp_acum_real = 0  # acumulado real de PREESP del alumno desde sem 5
+        for _sem in range(1, 9):
+            _mats_sem = [m for m in _mapa_lista if m.get("ciclo") == _sem]
+            if not _mats_sem:
+                continue
+
+            _basicas_verif = {
+                str(m.get("clave", "")).strip().upper()
+                for m in _mats_sem
+                if m.get("categoria") == "BASICA"
+                and not str(m.get("clave", "")).strip().upper().startswith("PID")
+            }
+            _el_verif = {
+                str(m.get("clave", "")).strip().upper()
+                for m in _mats_sem
+                if m.get("categoria") == "ELECCION_LIBRE"
+            }
+            _preesp_verif = {
+                str(m.get("clave", "")).strip().upper()
+                for m in _mats_sem
+                if m.get("categoria") == "PREESPECIALIDAD"
+            }
+
+            _n_basicas = len(_basicas_verif & _en_contacto_anal)
+            _n_el      = len(_el_verif & _en_contacto_anal)
+            _n_preesp  = len(_preesp_verif & _en_contacto_anal) if _sem >= 5 else 0
+
+            # Acumulados reales desde sem 5
+            if _sem >= 5:
+                _el_acum_real     += _n_el
+                _preesp_acum_real += _n_preesp
+
+            filas_verif.append({
+                "Semestre":                    _sem,
+                "Básicas cargadas":            _n_basicas,
+                "Total básicas plan":          len(_basicas_verif),
+                "EL cargadas":                 _n_el,
+                "Total EL plan":               len(_el_verif),
+                "EL acum. real alumno":        _el_acum_real if _sem >= 5 else "—",
+                "EL_RECOMENDADAS_POR_CICLO":   EL_RECOMENDADAS_POR_CICLO.get(_sem, 0),
+                "EL_ACUMULADAS_CICLO (target)": EL_ACUMULADAS_CICLO.get(_sem, 0),
+                "Preesp cargadas":             _n_preesp if _sem >= 5 else "—",
+                "Total preesp plan":           len(_preesp_verif) if _sem >= 5 else "—",
+                "Preesp acum. real alumno":    _preesp_acum_real if _sem >= 5 else "—",
+                "PREESP_ACUMULADAS_CICLO (target)": PREESP_ACUMULADAS_CICLO.get(_sem, "—"),
+            })
+
+        if filas_verif:
+            st.dataframe(
+                pd.DataFrame(filas_verif),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    # ===================================================================
+    # PESTAÑA PRUEBAS: Diagnóstico de captura de datos
+    # ===================================================================
+    with tab_pruebas_main:
+        st.header("🔬 Diagnóstico de captura de datos")
+        st.caption("Esta pestaña muestra exactamente cómo el sistema interpreta los datos del Kardex y el Historial Académico, y cómo asigna ciclos a cada materia.")
+
+        # --- Construir tabla de diagnóstico ---
+        mapa_dict = {m["clave"]: m for m in mapa_curricular} if mapa_curricular else {}
+
+        filas_diag = []
+        for _, row in historial_filtrado.iterrows():
+            clave = str(row.get("clave", "")).strip().upper()
+            mat_mapa = mapa_dict.get(clave, {})
+            ciclo_parser = row.get("ciclo", None)
+            ciclo_mapa   = mat_mapa.get("ciclo", None)
+            en_mapa      = clave in mapa_dict
+
+            filas_diag.append({
+                "Clave":              clave,
+                "Nombre":             row.get("nombre", "") or mat_mapa.get("nombre", ""),
+                "Estatus":            row.get("estatus", ""),
+                "Calificación":       row.get("calificacion", ""),
+                "Periodo":            row.get("periodo", ""),
+                "Ciclo (parser)": int(ciclo_parser) if pd.notna(ciclo_parser) and ciclo_parser not in ["", None] else "—",
+                "Ciclo (mapa oficial)": int(ciclo_mapa) if ciclo_mapa is not None else "❌ No en mapa",
+                "Ciclo anual (mapa)": int(mat_mapa["ciclo_anual"]) if mat_mapa.get("ciclo_anual") is not None else "—",
+                "Categoría":          mat_mapa.get("categoria", "—"),
+                "¿En mapa?": "✅" if en_mapa else "❌",
+            })
+
+        df_diag = pd.DataFrame(filas_diag)
+
+        st.subheader("📋 Tabla: Historial procesado vs Mapa Curricular")
+        st.caption("Compara el ciclo que asigna el parser con el ciclo oficial del mapa. Discrepancias aquí explican errores en el sistema experto.")
+
+        # Colorear filas donde los ciclos no coinciden
+        def highlight_mismatch(row):
+            try:
+                cp = int(row["Ciclo (parser)"])
+                cm = int(row["Ciclo (mapa oficial)"])
+                if cp != cm:
+                    return ["background-color: #fff3cd"] * len(row)
+            except Exception:
+                pass
+            if row["¿En mapa?"] == "❌":
+                return ["background-color: #f8d7da"] * len(row)
+            return [""] * len(row)
+
+        st.dataframe(
+            df_diag.style.apply(highlight_mismatch, axis=1),
+            use_container_width=True,
+            height=400,
+        )
+
+        # Leyenda
+        st.caption("🟡 Amarillo = ciclo del parser difiere del ciclo oficial en el mapa  |  🔴 Rojo = materia no encontrada en el mapa curricular")
+
+        discrepancias = 0
+        no_en_mapa = 0
+        for r in filas_diag:
+            if r["¿En mapa?"] == "❌":
+                no_en_mapa += 1
+            else:
+                try:
+                    if int(r["Ciclo (parser)"]) != int(r["Ciclo (mapa oficial)"]):
+                        discrepancias += 1
+                except Exception:
+                    pass
+
+        col_d1, col_d2, col_d3 = st.columns(3)
+        with col_d1:
+            st.metric("Total materias procesadas", len(df_diag))
+        with col_d2:
+            st.metric("Discrepancias de ciclo", discrepancias, delta=None if discrepancias == 0 else f"-{discrepancias} incorrectas", delta_color="inverse")
+        with col_d3:
+            st.metric("No encontradas en mapa", no_en_mapa, delta_color="inverse")
+
+        st.divider()
+
+        # --- Tabla resumen por ciclo (perspectiva del sistema experto) ---
+        st.subheader("📊 Resumen por ciclo semestral (como lo ve el Sistema Experto)")
+        st.caption("El sistema experto usa los ciclos del mapa oficial (1-8 semestrales). Se avanza de ciclo cuando se aprueba ≥75% del ciclo actual.")
+
+        aprobadas_set = set(df_diag.loc[df_diag["Estatus"] == "APROBADA", "Clave"].tolist())
+        en_curso_set  = set(df_diag.loc[df_diag["Estatus"].isin(["EN_CURSO", "RECURSANDO"]), "Clave"].tolist())
+
+        filas_ciclo = []
+        for ciclo_n in range(1, 9):
+            mats_c = [m for m in mapa_curricular if m.get("ciclo") == ciclo_n]
+            if not mats_c:
+                continue
+            claves_c  = {m["clave"] for m in mats_c}
+            aprobadas_c = claves_c & aprobadas_set
+            en_curso_c  = claves_c & en_curso_set
+            contacto_c  = claves_c & (aprobadas_set | en_curso_set)
+            pendientes_c = claves_c - aprobadas_set - en_curso_set
+            pct = len(aprobadas_c) / len(mats_c) * 100 if mats_c else 0
+            supera_75 = pct >= 75
+            tiene_contacto = len(contacto_c) > 0
+            filas_ciclo.append({
+                "Ciclo semestral": ciclo_n,
+                "Total materias (mapa)": len(mats_c),
+                "✅ Aprobadas": len(aprobadas_c),
+                "📖 En curso": len(en_curso_c),
+                "⏳ Pendientes": len(pendientes_c),
+                "% Aprobado": f"{pct:.1f}%",
+                "¿Supera 75%?": "✅ SÍ" if supera_75 else "❌ NO",
+                "¿Tiene contacto?": "✅" if tiene_contacto else "❌",
+            })
+
+        df_ciclos = pd.DataFrame(filas_ciclo)
+
+        def highlight_ciclo(row):
+            if row["¿Supera 75%?"] == "✅ SÍ" and row["¿Tiene contacto?"] == "✅":
+                return ["background-color: #d4edda"] * len(row)  # verde: ciclo superado
+            if row["¿Tiene contacto?"] == "✅":
+                return ["background-color: #cce5ff"] * len(row)  # azul: ciclo actual
+            return [""] * len(row)
+
+        st.dataframe(
+            df_ciclos.style.apply(highlight_ciclo, axis=1),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption("🟢 Verde = ciclo superado (≥75% aprobado)  |  🔵 Azul = ciclo actual (tiene contacto pero <75%)  |  Sin color = ciclo no iniciado")
+
+        st.divider()
+
+        # --- Materias del historial NO encontradas en el mapa ---
+        df_no_mapa = df_diag[df_diag["¿En mapa?"] == "❌"][["Clave", "Nombre", "Estatus", "Ciclo (parser)"]]
+        if not df_no_mapa.empty:
+            st.subheader("⚠️ Materias del historial NO encontradas en el mapa curricular")
+            st.caption("Estas materias fueron parseadas pero el sistema experto no las reconoce (pueden ser equivalencias, propedéuticos u otras claves).")
+            st.dataframe(df_no_mapa, use_container_width=True, hide_index=True)
+        else:
+            st.success("✅ Todas las materias del historial están en el mapa curricular.")
 
 
 if __name__ == "__main__":

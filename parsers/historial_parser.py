@@ -7,6 +7,7 @@ También extrae el estatus de cada materia:
 - Si tiene calificación numérica o "S" → APROBADA
 - Si no tiene calificación → PENDIENTE (no cursada o sin aprobar aún)
 """
+import unicodedata
 import pdfplumber
 import pandas as pd
 import re
@@ -87,29 +88,42 @@ class HistorialParser:
         self._extraer_nivel_ingles(texto_completo)
         return self.materias
 
+    @staticmethod
+    def _nfc(s: str) -> str:
+        """Normaliza a NFC para comparación segura con texto extraído de PDF."""
+        return unicodedata.normalize('NFC', s)
+
     def _extraer_nivel_ingles(self, texto: str):
         """
         Extrae el último nivel de inglés aprobado del historial.
         Formato: "Último nivel de Inglés aprobado: Nivel 2 Inglés"
         o: "Último nivel de Inglés aprobado: Tópicos 2"
+
+        pdfplumber puede extraer caracteres acentuados en NFD (o + acento
+        combinado) en lugar de NFC (carácter compuesto). Se normaliza todo
+        a NFC antes de comparar para evitar falsos negativos.
         """
+        # Normalizar texto completo a NFC antes de aplicar regex
+        texto_nfc = self._nfc(texto)
+
         match = re.search(
             r'[UÚ]ltimo\s+nivel\s+de\s+[Ii]ngl[eé]s\s+aprobado:\s*(.+?)(?:\n|$)',
-            texto, re.IGNORECASE
+            texto_nfc, re.IGNORECASE
         )
         if not match:
             return
 
-        texto_nivel = match.group(1).strip().lower()
+        texto_nivel = self._nfc(match.group(1).strip().lower())
         # Quitar "inglés" o "ingles" del final para normalizar
         texto_nivel_norm = re.sub(r'\s*ingl[eé]s\s*$', '', texto_nivel).strip()
         self.nivel_ingles_texto = match.group(1).strip()
 
-        # Buscar el nivel en la cadena
+        # Buscar el nivel en la cadena (comparación NFC vs NFC)
         nivel_encontrado = 0
         for entry in self.CADENA_INGLES:
             for nombre in entry["nombres"]:
-                if nombre in texto_nivel_norm or texto_nivel_norm in nombre:
+                nombre_nfc = self._nfc(nombre)
+                if nombre_nfc in texto_nivel_norm or texto_nivel_norm in nombre_nfc:
                     nivel_encontrado = max(nivel_encontrado, entry["nivel"])
 
         self.nivel_ingles_aprobado = nivel_encontrado

@@ -1,590 +1,959 @@
 """
-Sistema Experto de Seriación Curricular (NATIVO)
-Plan 2021 - IDeIO (Ingeniería en Datos e Inteligencia Organizacional)
+SISTEMA EXPERTO DE SERIACIÓN CURRICULAR v3
+Genera el conjunto de materias candidatas que puede cursar un estudiante.
 
-Implementación nativa de sistema experto (sin dependencias externas)
-para seriación adaptativa basada en progreso académico.
+FLUJO:
+  1. Determinar ciclo actual (primer ciclo con <75% aprobación)
+  2. Generar candidatas iniciales (materias de ciclos ≤ actual, no aprobadas, no en curso)
+  3. Regla A: Validar prerequisitos (todos deben estar APROBADOS)
+  4. Regla B: Eliminar cadenas seriación (mantener solo base de cada cadena)
+  
+OUTPUT: Conjunto de materias candidatas viables
 """
 
 import json
-from typing import List, Dict, Set, Tuple, Optional
 from pathlib import Path
-from dataclasses import dataclass
-from enum import Enum
+from typing import Dict, List, Set, Tuple, Optional
 
 
-# ============================================================================
-# TIPOS Y ENUMERACIONES
-# ============================================================================
+# =============================================================================
+# CARGAR Y PARSEAR DATOS
+# =============================================================================
 
-class TipoAlerta(Enum):
-    """Tipos de alertas que puede generar el sistema"""
-    BLOQUEO = "BLOQUEO"           # Prerequisito no cumplido
-    LIGADURA = "LIGADURA"         # Materia bloqueada por ligadura
-    REZAGO = "REZAGO"             # Materia rezagada (de ciclo anterior)
-
-
-@dataclass
-class Materia:
-    """Representación de una materia del currículo"""
-    clave: str
-    nombre: str
-    ciclo: int
-    categoria: str
-    creditos: int
-    requisitos: List[str] = None
+def cargar_mapa_curricular(plan: str = "2021ID") -> List[Dict]:
+    """Carga el mapa curricular y lo convierte a lista."""
+    ruta = Path(__file__).parent.parent / "data" / f"mapa_curricular_{plan}_real_completo.json"
     
-    def __post_init__(self):
-        if self.requisitos is None:
-            self.requisitos = []
-
-
-@dataclass
-class EstudianteInfo:
-    """Información del estudiante"""
-    id: str
-    nombre: str
-    promedio: float = 0.0
-    total_creditos: int = 0
-
-
-@dataclass
-class MateriaAprobada:
-    """Registro de materia aprobada"""
-    clave: str
-    calificacion: float
-    creditos_obtenidos: int
-
-
-@dataclass
-class Alerta:
-    """Alerta académica generada"""
-    tipo: TipoAlerta
-    materia: Optional[str] = None
-    descripcion: str = ""
-
-
-# ============================================================================
-# MOTOR DE INFERENCIA NATIVO
-# ============================================================================
-
-class SistemaExpertoSeriacion:
-    """
-    Motor de inferencia nativo para cálculo de seriación.
+    if not ruta.exists():
+        return []
     
-    Algoritmo:
-    1. Detectar ciclo actual (>=75% de créditos completados)
-    2. Generar candidatas temporales (materias del ciclo actual + rezagadas)
-    3. Filtrar por requisitos (solo si todos los prerequisitos aprobados)
-    4. Aplicar regla de ligaduras (eliminar dependientes si ambas candidatas)
-    """
-    
-    def __init__(self, mapa_curricular: Dict[str, dict]):
-        """
-        Inicializa el sistema con el mapa curricular.
-        
-        Args:
-            mapa_curricular: {clave: {nombre, ciclo, categoria, creditos, requisitos}}
-        """
-        self.mapa_curricular = {
-            clave: Materia(
-                clave=clave,
-                nombre=datos.get("nombre", ""),
-                ciclo=datos.get("ciclo", 1),
-                categoria=datos.get("categoria", ""),
-                creditos=datos.get("creditos", 0),
-                requisitos=datos.get("requisitos", [])
-            )
-            for clave, datos in mapa_curricular.items()
-        }
-        
-        self.diagrama_ligaduras = self._construir_ligaduras()
-        self.alertas = []
-
-        # Cadena de Inglés ordenada (para diagnóstico de nivel)
-        self.cadena_ingles = ["ID0107", "ID0207", "ID0307", "ID0406", "ID0507", "ID0606"]
-    
-    def _construir_ligaduras(self) -> Dict[str, str]:
-        """
-        Construye diagrama de ligaduras: {materia_dependiente: materia_requisito}
-        
-        Ligadura: si una materia tiene un único prerequisito obligatorio directo
-        y ambas son candidatas, la dependiente se elimina (regla del profesor).
-        """
-        ligaduras = {}
-        
-        for clave, materia in self.mapa_curricular.items():
-            # Una materia tiene ligadura si tiene exactamente 1 prerequisito
-            # y están en ciclos consecutivos o mismo ciclo
-            if len(materia.requisitos) == 1:
-                req = materia.requisitos[0]
-                if req in self.mapa_curricular:
-                    ciclo_req = self.mapa_curricular[req].ciclo
-                    ciclo_mat = materia.ciclo
-                    
-                    # Ligadura si ciclos son consecutivos o mismos
-                    if 0 <= ciclo_mat - ciclo_req <= 1:
-                        ligaduras[clave] = req
-        
-        return ligaduras
-    
-    def detectar_ciclo_actual(
-        self,
-        historial: List[MateriaAprobada]
-    ) -> int:
-        """
-        Detecta el ciclo actual basándose en créditos completados por ciclo.
-        
-        Un ciclo se considera "completado" cuando tiene >=75% de sus créditos.
-        """
-        # Agrupar creditos por ciclo
-        creditos_aprobados = {}
-        creditos_totales = {}
-        
-        for materia in self.mapa_curricular.values():
-            ciclo = materia.ciclo
-            
-            if ciclo not in creditos_totales:
-                creditos_totales[ciclo] = 0
-                creditos_aprobados[ciclo] = 0
-            
-            creditos_totales[ciclo] += materia.creditos
-            
-            # Buscar en historial si está aprobada
-            for h in historial:
-                if h.clave == materia.clave:
-                    creditos_aprobados[ciclo] += h.creditos_obtenidos
-                    break
-        
-        # Encontrar primer ciclo no completado
-        ciclo_actual = 1
-        for ciclo in sorted(creditos_totales.keys()):
-            porcentaje = (creditos_aprobados[ciclo] / creditos_totales[ciclo] * 100)
-            
-            print(f"[CICLO {ciclo}] {porcentaje:.1f}% "
-                  f"({creditos_aprobados[ciclo]}/{creditos_totales[ciclo]} creditos)")
-            
-            if porcentaje >= 75:
-                ciclo_actual = ciclo + 1
-            else:
-                break
-        
-        return ciclo_actual
-    
-    def generar_candidatas_temporales(
-        self,
-        ciclo_actual: int,
-        historial: List[MateriaAprobada]
-    ) -> List[str]:
-        """
-        Genera lista de materias candidatas (no cursadas) del ciclo actual
-        y ciclos anteriores (rezagadas).
-        """
-        materias_aprobadas = {h.clave for h in historial}
-        candidatas = []
-        
-        for clave, materia in self.mapa_curricular.items():
-            # Candidata si: (1) no aprobada, (2) del ciclo actual o anterior
-            if clave not in materias_aprobadas and materia.ciclo <= ciclo_actual:
-                candidatas.append(clave)
-        
-        print(f"[CANDIDATAS] {len(candidatas)} materias")
-        
-        return candidatas
-    
-    def filtrar_por_requisitos(
-        self,
-        candidatas: List[str],
-        historial: List[MateriaAprobada]
-    ) -> List[str]:
-        """
-        Filtra candidatas verificando que todos los requisitos estén aprobados.
-        """
-        materias_aprobadas = {h.clave for h in historial}
-        candidatas_validas = []
-        
-        for clave in candidatas:
-            materia = self.mapa_curricular[clave]
-            tiene_requisitos = True
-            
-            for requisito in materia.requisitos:
-                if requisito not in materias_aprobadas:
-                    tiene_requisitos = False
-                    
-                    self.alertas.append(Alerta(
-                        tipo=TipoAlerta.BLOQUEO,
-                        materia=clave,
-                        descripcion=f"Requiere {requisito}"
-                    ))
-                    break
-            
-            if tiene_requisitos:
-                candidatas_validas.append(clave)
-        
-        print(f"[VALIDAS] {len(candidatas_validas)} materias (despues requisitos)")
-        
-        return candidatas_validas
-    
-    def aplicar_regla_ligaduras(
-        self,
-        candidatas: List[str]
-    ) -> List[str]:
-        """
-        Aplicaregla de ligaduras:
-        Si ambas materias (requisito y dependiente) son candidatas,
-        elimina la dependiente hasta que se complete la requisito.
-        """
-        candidatas_set = set(candidatas)
-        materias_eliminar = set()
-        
-        for materia_dep, materia_req in self.diagrama_ligaduras.items():
-            # Si ambas son candidatas, eliminar la dependiente
-            if materia_dep in candidatas_set and materia_req in candidatas_set:
-                materias_eliminar.add(materia_dep)
-                
-                self.alertas.append(Alerta(
-                    tipo=TipoAlerta.LIGADURA,
-                    materia=materia_dep,
-                    descripcion=f"Suspendida hasta completar {materia_req}"
-                ))
-        
-        if materias_eliminar:
-            print(f"[LIGADURAS] Eliminadas {len(materias_eliminar)} materias")
-            candidatas = [c for c in candidatas if c not in materias_eliminar]
-        
-        return candidatas
-
-    def filtrar_por_oferta_academica(
-        self,
-        candidatas: List[str],
-        oferta_claves: Optional[Set[str]]
-    ) -> List[str]:
-        """
-        Filtra candidatas por oferta académica del periodo vigente.
-        Si no se proporciona oferta, no aplica filtro.
-        """
-        if not oferta_claves:
-            return candidatas
-
-        candidatas_filtradas = [c for c in candidatas if c in oferta_claves]
-        print(
-            f"[OFERTA] {len(candidatas_filtradas)} materias "
-            f"(de {len(candidatas)} candidatas)"
-        )
-        return candidatas_filtradas
-    
-    def _resolver_nivel_ingles(self, historial: List[MateriaAprobada]) -> List[MateriaAprobada]:
-        """
-        Regla especial: alumnos que ingresan con nivel de inglés avanzado
-        por examen diagnóstico. Si el historial contiene un nivel de inglés
-        sin tener los niveles previos, se completan automáticamente los
-        niveles anteriores como si estuvieran acreditados (créditos 0,
-        calificación 10 — acreditado por diagnóstico).
-        """
-        claves_aprobadas = {h.clave for h in historial}
-        historial_extra = list(historial)
-
-        # Encontrar el nivel más alto de inglés registrado en el historial
-        nivel_maximo = -1
-        for i, clave in enumerate(self.cadena_ingles):
-            if clave in claves_aprobadas:
-                nivel_maximo = i
-
-        if nivel_maximo <= 0:
-            return historial  # Sin nivel avanzado, no hay nada que resolver
-
-        # Agregar virtualmente todos los niveles previos no registrados
-        for i in range(nivel_maximo):
-            clave_previa = self.cadena_ingles[i]
-            if clave_previa not in claves_aprobadas:
-                materia = self.mapa_curricular.get(clave_previa)
-                creditos = materia.creditos if materia else 0
-                historial_extra.append(MateriaAprobada(
-                    clave=clave_previa,
-                    calificacion=10.0,  # Acreditado por diagnóstico
-                    creditos_obtenidos=creditos
-                ))
-                print(f"[INGLÉS] {clave_previa} agregado virtualmente por examen diagnóstico")
-
-        return historial_extra
-
-    def ejecutar(
-        self,
-        historial: List[MateriaAprobada],
-        materias_en_curso: Optional[List[str]] = None,
-        oferta_claves: Optional[Set[str]] = None
-    ) -> Dict:
-        """
-        Ejecuta el sistema completo y retorna materias recomendadas.
-        
-        Returns:
-            {
-                "ciclo_actual": int,
-                "ciclo_recomendado": int,
-                "materias_recomendadas": [...],
-                "alertas": [...],
-                "diagrama_ligaduras": {...}
-            }
-        """
-        self.alertas = []
-
-        # Regla especial: nivel de inglés por examen diagnóstico
-        historial = self._resolver_nivel_ingles(historial)
-
-        # PASO 1: Detectar ciclo actual
-        ciclo_actual = self.detectar_ciclo_actual(historial)
-        ciclo_recomendado = ciclo_actual
-        
-        print(f"[INFO] Ciclo actual: {ciclo_actual}")
-        
-        # PASO 2: Generar candidatas temporales
-        candidatas = self.generar_candidatas_temporales(ciclo_actual, historial)
-        
-        # PASO 3: Filtrar por requisitos
-        candidatas = self.filtrar_por_requisitos(candidatas, historial)
-        
-        # PASO 4: Aplicar regla de ligaduras
-        candidatas = self.aplicar_regla_ligaduras(candidatas)
-
-        # PASO 5: Filtrar por oferta académica (si existe)
-        candidatas = self.filtrar_por_oferta_academica(candidatas, oferta_claves)
-
-        # PASO 6: Excluir materias actualmente en curso
-        if materias_en_curso:
-            en_curso_set = set(materias_en_curso)
-            candidatas = [c for c in candidatas if c not in en_curso_set]
-            print(f"[EN_CURSO] Excluidas materias en curso; quedan {len(candidatas)}")
-        
-        # PASO 7: Generar detalles de materias recomendadas
-        materias_recomendadas = []
-        for clave in candidatas:
-            materia = self.mapa_curricular[clave]
-            materias_recomendadas.append({
-                "clave": materia.clave,
-                "nombre": materia.nombre,
-                "ciclo": materia.ciclo,
-                "categoria": materia.categoria,
-                "creditos": materia.creditos
-            })
-        
-        print(f"[RECOMENDACIONES] {len(materias_recomendadas)} materias\n")
-        
-        # Retornar resultado
-        return {
-            "ciclo_actual": ciclo_actual,
-            "ciclo_recomendado": ciclo_recomendado,
-            "materias_recomendadas": materias_recomendadas,
-            "total_materias_recomendadas": len(materias_recomendadas),
-            "alertas": [
-                {
-                    "tipo": a.tipo.value,
-                    "materia": a.materia,
-                    "descripcion": a.descripcion
-                }
-                for a in self.alertas
-            ],
-            "diagrama_ligaduras": self.diagrama_ligaduras
-        }
-
-
-# ============================================================================
-# FUNCIONES PÚBLICAS
-# ============================================================================
-
-def cargar_mapa_curricular(ruta_json: str) -> Dict:
-    """Carga el mapa curricular desde JSON"""
-    with open(ruta_json, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-
-def cargar_oferta_academica_vigente(
-    ruta_oferta: Path,
-    plan_estudios: str = "2021ID",
-    periodo_objetivo: Optional[str] = None
-) -> Tuple[Set[str], Optional[str]]:
-    """
-    Carga las claves ofertadas del periodo más reciente (o uno específico)
-    para un plan de estudios.
-    """
-    if not ruta_oferta.exists() or not ruta_oferta.is_dir():
-        return set(), None
-
-    archivos = sorted(list(ruta_oferta.glob("*.xls")) + list(ruta_oferta.glob("*.xlsx")))
-    if not archivos:
-        return set(), None
-
     try:
-        import pandas as pd
-    except Exception:
-        return set(), None
+        with open(ruta, "r", encoding="utf-8") as f:
+            datos = json.load(f)
+            
+            # Si es dict (mapeado por clave), convertir a lista
+            if isinstance(datos, dict):
+                resultado = []
+                for clave, info in datos.items():
+                    if isinstance(info, dict):
+                        # NORMALIZAR: Poner clave en UPPERCASE
+                        clave_normalizada = str(clave).strip().upper()
+                        info["clave"] = clave_normalizada
+                        resultado.append(info)
+                return resultado
+            
+            return datos if isinstance(datos, list) else []
+    except Exception as e:
+        print(f"Error cargando mapa curricular: {e}")
+        return []
 
-    bloques = []
-    for archivo in archivos:
-        try:
-            # Los IRSecciones usan encabezado en la fila 2
-            df = pd.read_excel(archivo, header=1)
-            columnas = {str(c).strip() for c in df.columns}
-            if not {"Plan Estudio", "Clave", "Periodo"}.issubset(columnas):
-                continue
 
-            sub = df[df["Plan Estudio"].astype(str).str.strip().eq(plan_estudios)].copy()
-            if sub.empty:
-                continue
+# =============================================================================
+# FASE 1: DETERMINACIÓN DEL CICLO ACTUAL
+# =============================================================================
 
-            sub = sub[["Periodo", "Clave"]].dropna(subset=["Periodo", "Clave"])
-            bloques.append(sub)
-        except Exception:
+def detectar_ciclo_actual(
+    historial: List[Dict],
+    mapa: List[Dict]
+) -> int:
+    """
+    Determina el ciclo actual del estudiante (en semestres 1-8).
+
+    Algoritmo:
+      Cuenta los periodos hábiles únicos (terminados en 01 o 03) que el
+      estudiante ha cursado en su kardex. Periodos de vacaciones (02, 04)
+      no cuentan como semestres regulares.
+
+      El resultado se limita al rango 1-8 del plan de estudios.
+
+    Returns:
+        int: Ciclo actual (semestre 1-8)
+    """
+    # Extraer todos los periodos únicos del historial, excluyendo
+    # periodos donde TODAS las materias son BAJA_TEMPORAL (BTT).
+    periodos_todas = set()
+    periodos_btt = set()
+    materias_por_periodo = {}
+    for mat in historial:
+        p = str(mat.get("periodo", "")).strip()
+        estatus = str(mat.get("estatus", "")).upper()
+        if len(p) == 6 and p.isdigit():
+            periodos_todas.add(p)
+            materias_por_periodo.setdefault(p, []).append(estatus)
+
+    # Un periodo es BTT si TODAS sus materias tienen estatus BAJA_TEMPORAL
+    for p, estatuses in materias_por_periodo.items():
+        if all(e == "BAJA_TEMPORAL" for e in estatuses):
+            periodos_btt.add(p)
+
+    periodos_activos = periodos_todas - periodos_btt
+
+    # Contar solo periodos hábiles (01 = Primavera, 03 = Otoño)
+    periodos_habiles = sorted(p for p in periodos_activos if p[-2:] in ("01", "03"))
+
+    if not periodos_habiles:
+        # Sin periodos en el historial: fallback por avance académico
+        return _detectar_ciclo_por_avance(historial, mapa)
+
+    # El semestre actual es el número de periodos hábiles cursados,
+    # limitado al rango 1-8
+    ciclo_actual = min(len(periodos_habiles), 8)
+
+    return max(1, ciclo_actual)
+
+
+def _detectar_ciclo_por_avance(
+    historial: List[Dict],
+    mapa: List[Dict]
+) -> int:
+    """
+    Fallback: detecta el ciclo por avance académico (75% de básicas)
+    cuando no hay información de periodos en el historial.
+    """
+    aprobadas = {
+        str(mat.get("clave", "")).strip().upper()
+        for mat in historial
+        if mat.get("estatus", "").upper() == "APROBADA"
+    }
+    en_curso = {
+        str(mat.get("clave", "")).strip().upper()
+        for mat in historial
+        if mat.get("estatus", "").upper() in ["EN_CURSO", "RECURSANDO"]
+    }
+    en_contacto = aprobadas | en_curso
+
+    el_claves_early = {
+        str(m.get("clave", "")).strip().upper()
+        for m in mapa
+        if m.get("categoria") == "ELECCION_LIBRE" and m.get("ciclo", 0) <= 4
+    }
+    el_total_early = len(el_claves_early & en_contacto)
+
+    ciclo_actual = 1
+
+    for ciclo in range(1, 9):
+        materias_ciclo = [m for m in mapa if m.get("ciclo") == ciclo]
+        if not materias_ciclo:
             continue
 
-    if not bloques:
-        return set(), None
+        claves_ciclo = {str(m.get("clave", "")).strip().upper() for m in materias_ciclo}
+        if not (claves_ciclo & en_contacto):
+            break
 
-    oferta = pd.concat(bloques, ignore_index=True)
-    oferta["Periodo"] = oferta["Periodo"].astype(str).str.strip()
-    oferta["Clave"] = oferta["Clave"].astype(str).str.strip()
+        ciclo_actual = ciclo
 
-    if periodo_objetivo is None:
-        periodos = sorted(p for p in oferta["Periodo"].unique().tolist() if p.isdigit())
-        if not periodos:
-            return set(), None
-        periodo_objetivo = periodos[-1]
+        basicas_ciclo = {
+            str(m.get("clave", "")).strip().upper()
+            for m in materias_ciclo
+            if m.get("categoria") == "BASICA"
+            and not str(m.get("clave", "")).strip().upper().startswith("PID")
+        }
+        if not basicas_ciclo:
+            continue
 
-    oferta_periodo = oferta[oferta["Periodo"] == str(periodo_objetivo)]
-    claves = set(oferta_periodo["Clave"].unique().tolist())
-    return claves, str(periodo_objetivo)
+        cursadas_basicas = len(basicas_ciclo & (aprobadas | en_curso))
+        total_basicas = len(basicas_ciclo)
+
+        if ciclo <= 4:
+            el_credit = min(el_total_early, ciclo) - min(el_total_early, ciclo - 1)
+            el_recomendadas = 1
+        else:
+            el_credit = 0
+            el_recomendadas = 0
+
+        total_ciclo = total_basicas + el_recomendadas
+        cursadas_total = cursadas_basicas + el_credit
+        porcentaje = cursadas_total / total_ciclo
+
+        if porcentaje < 0.75:
+            break
+        ciclo_actual = min(ciclo + 1, 8)
+
+    return ciclo_actual
 
 
-def nombre_temporada_periodo(periodo: Optional[str]) -> Optional[str]:
-    """Convierte el sufijo de periodo (PP) a nombre de temporada."""
-    if not periodo:
+# =============================================================================
+# FASE 2: CONSTRUCCIÓN DE CANDIDATAS INICIALES
+# =============================================================================
+
+def generar_candidatas_iniciales(
+    ciclo_actual: int,
+    mapa: List[Dict],
+    aprobadas: Set[str],
+    en_curso: Set[str]
+) -> Set[str]:
+    """
+    Genera el conjunto de candidatas iniciales: todas las materias que
+    pertenecen al ciclo actual o ciclos anteriores, que NO están aprobadas
+    ni en curso.
+    
+    Algoritmo:
+      candidatas = {}
+      PARA cada ciclo en [1 ... ciclo_actual]:
+          PARA cada materia en mapa WHERE materia.ciclo = ciclo:
+              SI materia NOT EN aprobadas AND materia NOT EN en_curso:
+                  candidatas.ADD(materia.clave)
+    
+    Returns:
+        Set[str]: Claves de materias candidatas iniciales
+    """
+    candidatas = set()
+    
+    for ciclo in range(1, ciclo_actual + 1):
+        # Materias de este ciclo
+        materias_ciclo = [m for m in mapa if m.get("ciclo") == ciclo]
+        
+        for materia in materias_ciclo:
+            clave = str(materia.get("clave", "")).strip().upper()  # NORMALIZAR
+            
+            # Incluir si: NO aprobada Y NO en curso
+            if clave and clave not in aprobadas and clave not in en_curso:
+                candidatas.add(clave)
+    
+    return candidatas
+
+
+# =============================================================================
+# FASE 3: REGLA A - VALIDACIÓN DE PREREQUISITOS
+# =============================================================================
+
+def obtener_prerequisitos(
+    clave: str,
+    mapa: List[Dict]
+) -> Set[str]:
+    """
+    Obtiene los prerequisitos de una materia.
+    
+    Returns:
+        Set[str]: Claves de los prerequisitos (vacío si no hay)
+    """
+    # NORMALIZAR clave a UPPERCASE
+    clave = str(clave).strip().upper()
+    
+    materia = next((m for m in mapa if str(m.get("clave", "")).upper() == clave), None)
+    if not materia:
+        return set()
+    
+    # El campo de prerequisitos en el JSON se llama "requisitos"
+    prerequisitos = materia.get("requisitos") or []
+    
+    if isinstance(prerequisitos, str):
+        # Si es string, probablemente una sola clave
+        return {str(prerequisitos).strip().upper()}
+    elif isinstance(prerequisitos, list):
+        # Si es lista, procesar cada elemento
+        resultado = set()
+        for req in prerequisitos:
+            if isinstance(req, str):
+                resultado.add(str(req).strip().upper())
+            elif isinstance(req, dict):
+                # Podría ser {clave: "...", tipo: "..."}
+                if "clave" in req:
+                    resultado.add(str(req["clave"]).strip().upper())
+        return resultado
+    
+    return set()
+
+
+def aplicar_regla_a_prerequisitos(
+    candidatas: Set[str],
+    aprobadas: Set[str],
+    mapa: List[Dict]
+) -> Set[str]:
+    """
+    REGLA A: Elimina candidatas cuyos prerequisitos NO estén APROBADOS.
+    
+    Principio: Una materia candidata SOLO es elegible si TODOS sus
+    prerequisitos ya están APROBADOS.
+    
+    Algoritmo:
+      candidatas_validas = {}
+      PARA cada materia_candidata en candidatas:
+          prerequisitos = obtener_prerequisitos(materia_candidata)
+          
+          SI prerequisitos es VACÍO:
+              candidatas_validas.ADD(materia_candidata)
+          SINO:
+              todos_cumplidos = TRUE
+              PARA cada prereq en prerequisitos:
+                  SI prereq NOT EN aprobadas:
+                      todos_cumplidos = FALSE
+                      BREAK
+              
+              SI todos_cumplidos:
+                  candidatas_validas.ADD(materia_candidata)
+    
+    Returns:
+        Set[str]: Candidatas que pasan la validación de prerequisitos
+    """
+    candidatas_validas = set()
+    
+    for clave in candidatas:
+        clave = str(clave).strip().upper()  # NORMALIZAR
+        requisitos = obtener_prerequisitos(clave, mapa)
+        
+        if not requisitos:
+            # Sin prerequisitos → válida
+            candidatas_validas.add(clave)
+        else:
+            # Verificar que TODOS los prerequisitos están APROBADOS
+            todos_cumplidos = all(req in aprobadas for req in requisitos)
+            
+            if todos_cumplidos:
+                candidatas_validas.add(clave)
+            # Si no, se elimina silenciosamente
+    
+    return candidatas_validas
+
+
+# =============================================================================
+# FASE 4: REGLA B - ELIMINACIÓN POR CADENA DE SERIACIÓN
+# =============================================================================
+
+def detectar_cadenas_seriacion(
+    candidatas: Set[str],
+    mapa: List[Dict]
+) -> List[List[str]]:
+    """
+    Detecta cadenas de seriación dentro del conjunto de candidatas.
+    
+    Una cadena es una secuencia de materias donde cada una es prerrequisito
+    de la siguiente.
+    
+    Returns:
+        List[List[str]]: Lista de cadenas (cada cadena es una lista ordenada
+                         desde la base hasta la más avanzada)
+    """
+    if not candidatas:
+        return []
+    
+    cadenas = []
+    visitadas = set()
+    
+    # NORMALIZAR todas las candidatas a UPPERCASE
+    candidatas = {str(c).strip().upper() for c in candidatas}
+    
+    for clave in candidatas:
+        if clave in visitadas:
+            continue
+        
+        # Construir cadena para esta materia
+        cadena = _construir_cadena_recursiva(clave, candidatas, mapa, set())
+        
+        if cadena:
+            # Ordenar: de base a avanzada
+            cadena_ordenada = _ordenar_cadena(cadena, mapa)
+            cadenas.append(cadena_ordenada)
+            visitadas.update(cadena)
+    
+    return cadenas
+
+
+def _construir_cadena_recursiva(
+    clave: str,
+    candidatas: Set[str],
+    mapa: List[Dict],
+    visitados: Set[str]
+) -> List[str]:
+    """
+    Construye recursivamente una cadena de seriación a partir de una materia.
+    
+    Busca prerequisitos de la materia que también estén en candidatas.
+    """
+    clave = str(clave).strip().upper()  # NORMALIZAR
+    
+    if clave in visitados:
+        return []
+    
+    visitados.add(clave)
+    cadena = [clave]
+    
+    # Buscar prerequisitos (normalizados)
+    requisitos = obtener_prerequisitos(clave, mapa)
+    
+    for req in requisitos:
+        req = str(req).strip().upper()  # NORMALIZAR
+        if req in candidatas and req not in visitados:
+            cadena_previa = _construir_cadena_recursiva(req, candidatas, mapa, visitados)
+            cadena = cadena_previa + cadena
+    
+    return cadena
+
+
+def _ordenar_cadena(
+    cadena: List[str],
+    mapa: List[Dict]
+) -> List[str]:
+    """
+    Ordena una cadena de base (sin prerequisitos) a avanzada.
+    Uses topological sort.
+    """
+    if len(cadena) <= 1:
+        return cadena
+    
+    # NORMALIZAR todas las claves
+    cadena = [str(c).strip().upper() for c in cadena]
+    
+    # Crear grafo de dependencias
+    grafo = {}
+    for clave in cadena:
+        requisitos = obtener_prerequisitos(clave, mapa) & set(cadena)
+        grafo[clave] = requisitos
+    
+    # Topological sort (Kahn's algorithm)
+    in_degree = {clave: 0 for clave in cadena}
+    for clave in cadena:
+        for req in grafo[clave]:
+            in_degree[clave] += 1
+    
+    cola = [clave for clave in cadena if in_degree[clave] == 0]
+    ordenada = []
+    
+    while cola:
+        # Tomar el que no tiene dependencias
+        nodo = cola.pop(0)
+        ordenada.append(nodo)
+        
+        # Buscar quién depende de este nodo
+        for clave in cadena:
+            if nodo in grafo[clave]:
+                in_degree[clave] -= 1
+                if in_degree[clave] == 0:
+                    cola.append(clave)
+    
+    # Si no se pudo ordenar completamente, retornar original
+    return ordenada if len(ordenada) == len(cadena) else cadena
+
+
+def aplicar_regla_b_cadenas(
+    candidatas: Set[str],
+    mapa: List[Dict]
+) -> Set[str]:
+    """
+    REGLA B: Elimina materias duplicadas en cadenas de seriación.
+    
+    Principio: Si en candidatas hay múltiples materias de la misma cadena,
+    mantener solo la más cercana al punto actual (la base) y eliminar las
+    demás (las más avanzadas).
+    
+    Algoritmo:
+      cadenas = detectar_cadenas_seriacion(candidatas)
+      
+      PARA cada cadena en cadenas:
+          candidatas_en_cadena = {mat IN candidatas PARA mat EN cadena}
+          
+          SI length(candidatas_en_cadena) > 1:
+              base = cadena[0]  // La más base
+              
+              PARA cada mat en candidatas_en_cadena - {base}:
+                  ELIMINAR mat de candidatas
+    
+    Returns:
+        Set[str]: Candidatas sin duplicados en cadenas
+    """
+    candidatas_depuradas = candidatas.copy()
+    
+    cadenas = detectar_cadenas_seriacion(candidatas, mapa)
+    
+    for cadena in cadenas:
+        # Candidatas actuales que están en esta cadena (NORMALIZAR)
+        candidatas_en_cadena = [str(c).strip().upper() for c in cadena if str(c).strip().upper() in candidatas]
+        
+        if len(candidatas_en_cadena) > 1:
+            # Mantener solo la base (primera en la cadena)
+            base = candidatas_en_cadena[0]
+            
+            # Eliminar las demás
+            for mat in candidatas_en_cadena[1:]:
+                candidatas_depuradas.discard(mat)
+    
+    return candidatas_depuradas
+
+
+# =============================================================================
+# FASE 5: REGLA C - CUOTA DE ELECCIÓN LIBRE POR CICLO ANUAL
+# =============================================================================
+
+# Claves de prácticas preespecialidad y su especialidad correspondiente
+PRACTICAS_PREESP_ESPECIALIDAD = {
+    "PID0403": "BUSINESS_INTELLIGENCE",  # Inteligencia Organizacional de Negocios
+    "PID0404": "TICS",                   # Innovación en TIC
+}
+
+# Materias de Elección Libre recomendadas por semestre, SOLO a partir del
+# ciclo anual 3 (semestres 5-8). En sems 1-4 no se incluyen en el umbral.
+EL_RECOMENDADAS_POR_CICLO = {5: 1, 6: 2, 7: 2, 8: 3}
+
+# Acumulado deseado de EL al final de cada semestre, contando DESDE cero
+# en el semestre 5 (ciclo anual 3). Sem 4 = 0 sirve como base del delta.
+# Fórmula de crédito: min(el_total, acum_curr) - min(el_total, acum_prev)
+#   → si el_total >= acum_curr  : crédito = recomendadas del semestre (máximo)
+#   → si el_total < acum_curr   : crédito = lo que el alumno aportó de nuevo
+EL_ACUMULADAS_CICLO = {4: 0, 5: 1, 6: 3, 7: 5, 8: 8}
+
+# Materias de Preespecialidad recomendadas por semestre (mapa ideal: 0,0,0,0,1,1,1,2)
+PREESP_RECOMENDADAS_POR_CICLO = {1: 0, 2: 0, 3: 0, 4: 0, 5: 1, 6: 1, 7: 1, 8: 2}
+
+# Total acumulado de Preespecialidad esperadas al final de cada semestre
+PREESP_ACUMULADAS_CICLO = {1: 0, 2: 0, 3: 0, 4: 0, 5: 1, 6: 2, 7: 3, 8: 5}
+
+# Cuotas requeridas de Elección Libre por ciclo anual
+EL_CUOTAS = {
+    1: 2,    # Ciclo anual 1 (semestres 1-2): 2 EL requeridas
+    2: 2,    # Ciclo anual 2 (semestres 3-4): 2 EL requeridas
+    "34": 8, # Ciclos anuales 3+4 combinados (semestres 5-8): 8 EL requeridas
+}
+
+
+def _grupo_anual(ciclo_anual: int):
+    """Devuelve la clave del grupo de cuota para un ciclo_anual dado."""
+    if ciclo_anual == 1:
+        return 1
+    elif ciclo_anual == 2:
+        return 2
+    elif ciclo_anual in (3, 4):
+        return "34"
+    return None
+
+
+def aplicar_regla_c_cuota_el(
+    candidatas: Set[str],
+    aprobadas: Set[str],
+    mapa: List[Dict]
+) -> Tuple[Set[str], int]:
+    """
+    REGLA C: Elimina candidatas de ELECCION_LIBRE de ciclos anuales donde
+    la cuota ya está cubierta.
+
+    Cuotas (definidas en EL_CUOTAS):
+      - Ciclo anual 1 (sems 1-2): 2 EL requeridas
+      - Ciclo anual 2 (sems 3-4): 2 EL requeridas
+      - Ciclos anuales 3+4 (sems 5-8): 8 EL requeridas
+
+    Returns:
+        Tuple[Set[str], int]: (candidatas_filtradas, numero_eliminadas)
+    """
+    # Construir índice mapa por clave
+    mapa_idx = {str(m.get("clave", "")).strip().upper(): m for m in mapa}
+
+    # Contar EL aprobadas por grupo anual
+    el_aprobadas_count = {1: 0, 2: 0, "34": 0}
+    for m in mapa:
+        clave = str(m.get("clave", "")).strip().upper()
+        if clave not in aprobadas:
+            continue
+        if "ELECCI" not in m.get("categoria", "").upper():
+            continue
+        grupo = _grupo_anual(m.get("ciclo_anual", 0))
+        if grupo is not None:
+            el_aprobadas_count[grupo] += 1
+
+    candidatas_filtradas = set()
+    for clave in candidatas:
+        clave = str(clave).strip().upper()
+        mat = mapa_idx.get(clave)
+        if not mat:
+            candidatas_filtradas.add(clave)
+            continue
+
+        if "ELECCI" not in mat.get("categoria", "").upper():
+            # No es EL → se mantiene siempre
+            candidatas_filtradas.add(clave)
+            continue
+
+        # Es EL → verificar si la cuota del grupo ya está cubierta
+        grupo = _grupo_anual(mat.get("ciclo_anual", 0))
+        if grupo is None:
+            candidatas_filtradas.add(clave)
+            continue
+
+        if el_aprobadas_count[grupo] < EL_CUOTAS[grupo]:
+            candidatas_filtradas.add(clave)
+        # else: cuota cubierta → se elimina
+
+    eliminadas = len(candidatas) - len(candidatas_filtradas)
+    return candidatas_filtradas, eliminadas
+
+
+# =============================================================================
+# FASE 6: REGLA D - FILTRO DE PREESPECIALIDAD POR ESPECIALIDAD DETECTADA
+# =============================================================================
+
+def detectar_especialidad(aprobadas: Set[str], plan: str = "2021ID") -> Optional[str]:
+    """
+    Detecta la especialidad del estudiante contando cuántas materias de
+    PREESPECIALIDAD tiene aprobadas en cada track.
+
+    Reglas:
+    - Si el alumno tiene materias aprobadas en UNA sola especialidad → esa especialidad.
+    - Si tiene materias en AMBAS especialidades → None (ambiguo, se muestran las dos).
+    - Si no tiene ninguna materia de preespecialidad → None (se muestran las dos).
+    """
+    ruta = Path(__file__).parent.parent / "data" / f"mapeo_especialidades_{plan}.json"
+    if not ruta.exists():
         return None
-    sufijo = str(periodo).strip()[-2:]
-    temporadas = {
-        "01": "Primavera",
-        "02": "Verano",
-        "03": "Otoño",
-        "04": "Invierno",
-    }
-    return temporadas.get(sufijo)
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            mapeo = json.load(f)
+    except Exception:
+        return None
 
+    conteos = {}
+    for especialidad, claves in mapeo.items():
+        claves_upper = {str(c).strip().upper() for c in claves}
+        conteos[especialidad] = len(claves_upper & aprobadas)
+
+    if not conteos or max(conteos.values()) == 0:
+        # Ninguna preespecialidad tocada → ambiguo
+        return None
+
+    especialidades_con_avance = [esp for esp, cnt in conteos.items() if cnt > 0]
+    if len(especialidades_con_avance) == 1:
+        # Solo una especialidad tiene avance → esa es la detectada
+        return especialidades_con_avance[0]
+
+    # Avance en más de una → ambiguo (se mostrarán ambas)
+    return None
+
+
+def _especialidad_completa(aprobadas: Set[str], plan: str = "2021ID") -> Optional[str]:
+    """
+    Devuelve el nombre de la especialidad cuyas materias de PREESPECIALIDAD
+    están TODAS aprobadas, o None si ninguna está completa.
+    """
+    ruta = Path(__file__).parent.parent / "data" / f"mapeo_especialidades_{plan}.json"
+    if not ruta.exists():
+        return None
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            mapeo = json.load(f)
+    except Exception:
+        return None
+
+    for especialidad, claves in mapeo.items():
+        claves_upper = {str(c).strip().upper() for c in claves}
+        if claves_upper and claves_upper.issubset(aprobadas):
+            return especialidad
+    return None
+
+
+def aplicar_regla_d_preespecialidad(
+    candidatas: Set[str],
+    aprobadas: Set[str],
+    mapa: List[Dict],
+    plan: str = "2021ID"
+) -> Tuple[Set[str], int, Optional[str]]:
+    """
+    REGLA D (nueva lógica de preespecialidad):
+
+    Casos:
+    A) Alumno sin ninguna preespecialidad aprobada → mantener candidatas de AMBAS.
+    B) Alumno con avance en UNA sola especialidad (no terminada) → eliminar
+       candidatas de la otra especialidad.
+    C) Alumno con avance en AMBAS especialidades → mantener candidatas de ambas
+       hasta que una se complete. Una vez completa una, las materias pendientes
+       de la otra que estén en candidatas se tratan como ELECCION_LIBRE (se
+       mantienen también, porque el mapa ya las tiene en ciclos 3/4).
+    D) Una especialidad ya está completa → solo recomendar la que falta (o nada
+       si las dos están completas).
+
+    Returns:
+        Tuple[Set[str], int, Optional[str]]:
+            (candidatas_filtradas, numero_eliminadas, especialidad_detectada)
+    """
+    ruta = Path(__file__).parent.parent / "data" / f"mapeo_especialidades_{plan}.json"
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            mapeo = json.load(f)
+    except Exception:
+        return candidatas, 0, None
+
+    # Conteos de maetrias preespecialidad aprobadas por especialidad
+    conteos = {}
+    claves_por_esp = {}
+    for esp, claves in mapeo.items():
+        claves_upper = {str(c).strip().upper() for c in claves}
+        claves_por_esp[esp] = claves_upper
+        conteos[esp] = len(claves_upper & aprobadas)
+
+    especialidades = list(mapeo.keys())
+    especialidad_detectada = None
+
+    # ¿Cuál especialidad (si alguna) está completa?
+    completa = _especialidad_completa(aprobadas, plan)
+
+    if completa is not None:
+        # Una especialidad terminada: solo recomendar materias de la otra
+        # (la otra puede ser una EL si la termina, pero por ahora se muestran)
+        especialidad_detectada = completa
+        otras_claves = set()
+        for esp in especialidades:
+            if esp != completa:
+                otras_claves.update(claves_por_esp.get(esp, set()))
+        # No eliminamos nada de candidatas aquí — las de la otra esp siguen siendo
+        # candidatas. Solo eliminamos las de la especialidad ya completa que aún
+        # podrían aparecer (no deberían, pero por si acaso).
+        mapa_idx = {str(m.get("clave", "")).strip().upper(): m for m in mapa}
+        candidatas_filtradas = set()
+        for clave in candidatas:
+            clave = str(clave).strip().upper()
+            mat = mapa_idx.get(clave)
+            if not mat:
+                candidatas_filtradas.add(clave)
+                continue
+            if "PREESP" in mat.get("categoria", "").upper() and clave in claves_por_esp.get(completa, set()):
+                continue  # ya completa, no recomendar sus pendientes
+            candidatas_filtradas.add(clave)
+        eliminadas = len(candidatas) - len(candidatas_filtradas)
+        return candidatas_filtradas, eliminadas, especialidad_detectada
+
+    # Ninguna completa
+    especialidades_con_avance = [esp for esp, cnt in conteos.items() if cnt > 0]
+
+    if len(especialidades_con_avance) == 0:
+        # Caso A: sin avance en ninguna → mostrar ambas
+        return candidatas, 0, None
+
+    if len(especialidades_con_avance) == 1:
+        # Caso B: solo una especialidad tocada → eliminar materias de la otra
+        esp_detectada = especialidades_con_avance[0]
+        especialidad_detectada = esp_detectada
+        claves_otras = set()
+        for esp in especialidades:
+            if esp != esp_detectada:
+                claves_otras.update(claves_por_esp.get(esp, set()))
+        mapa_idx = {str(m.get("clave", "")).strip().upper(): m for m in mapa}
+        candidatas_filtradas = set()
+        for clave in candidatas:
+            clave = str(clave).strip().upper()
+            mat = mapa_idx.get(clave)
+            if not mat:
+                candidatas_filtradas.add(clave)
+                continue
+            if "PREESP" in mat.get("categoria", "").upper() and clave in claves_otras:
+                continue
+            candidatas_filtradas.add(clave)
+        eliminadas = len(candidatas) - len(candidatas_filtradas)
+        return candidatas_filtradas, eliminadas, especialidad_detectada
+
+    # Caso C: avance en AMBAS → mantener candidatas de las dos
+    return candidatas, 0, None
+
+
+def aplicar_regla_e_practicas_preespecialidad(
+    candidatas: Set[str],
+    aprobadas: Set[str],
+    en_curso: Set[str],
+    especialidad_detectada: Optional[str],
+    plan: str = "2021ID"
+) -> Tuple[Set[str], int]:
+    """
+    REGLA E: Filtra las prácticas de preespecialidad.
+
+    Condiciones para que una práctica preespecialidad sea candidata:
+      1. La especialidad del estudiante coincide con la de la práctica.
+      2. El estudiante tiene ≥3 materias de esa preespecialidad aprobadas o en curso.
+      3. La práctica "contraria" no está ya aprobada ni en curso
+         (solo se puede cursar una).
+    """
+    cursadas = aprobadas | en_curso
+
+    ruta = Path(__file__).parent.parent / "data" / f"mapeo_especialidades_{plan}.json"
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            mapeo = json.load(f)
+    except Exception:
+        mapeo = {}
+
+    eliminadas = 0
+    resultado = set()
+
+    for clave in candidatas:
+        clave_norm = str(clave).strip().upper()
+        if clave_norm not in PRACTICAS_PREESP_ESPECIALIDAD:
+            resultado.add(clave_norm)
+            continue
+
+        especialidad_requerida = PRACTICAS_PREESP_ESPECIALIDAD[clave_norm]
+
+        # 1. Sin especialidad detectada o no coincide → eliminar
+        if especialidad_detectada != especialidad_requerida:
+            eliminadas += 1
+            continue
+
+        # 2. Verificar ≥3 materias de preespecialidad de su especialidad cursadas
+        materias_esp = {str(c).strip().upper() for c in mapeo.get(especialidad_requerida, [])}
+        if len(materias_esp & cursadas) < 3:
+            eliminadas += 1
+            continue
+
+        # 3. Si la práctica de la otra especialidad ya está en trayectoria → eliminar
+        otras = {k for k in PRACTICAS_PREESP_ESPECIALIDAD if k != clave_norm}
+        if otras & cursadas:
+            eliminadas += 1
+            continue
+
+        resultado.add(clave_norm)
+
+    return resultado, eliminadas
+
+
+# =============================================================================
+# FUNCIÓN PRINCIPAL
+# =============================================================================
 
 def ejecutar_sistema_experto(
-    datos_estudiante: Dict,
     historial_academico: List[Dict],
-    materias_en_curso: Optional[List[str]] = None,
-    usar_oferta_academica: bool = True,
-    periodo_oferta: Optional[str] = None,
+    mapa_curricular: Optional[List[Dict]] = None,
     plan_estudios: str = "2021ID"
 ) -> Dict:
     """
-    Ejecuta el sistema experto para un estudiante.
+    Ejecuta el sistema experto de seriación para generar materias candidatas.
     
     Args:
-        datos_estudiante: {id, nombre, promedio, total_creditos}
-        historial_academico: [{clave_materia, calificacion, creditos_obtenidos}, ...]
-        materias_en_curso: [clave_materia, ...]
+        historial_academico: Lista de materias cursadas
+                            [{clave, nombre, ciclo, estatus, calificacion, creditos}, ...]
+        mapa_curricular: Mapa curricular (si no se pasa, se carga automáticamente)
+        plan_estudios: ID del plan (default: 2021ID)
     
     Returns:
+        Dict:
         {
-            ciclo_actual,
-            ciclo_recomendado,
-            materias_recomendadas: [{clave, nombre, ciclo, categoria, creditos}, ...],
-            alertas: [{tipo, materia, descripcion}, ...],
-            total_materias_recomendadas,
-            diagrama_ligaduras
+            "ciclo_actual": int,
+            "candidatas_count": int,
+            "candidatas_claves": [str],
+            "candidatas_detalles": [
+                {
+                    "clave": str,
+                    "nombre": str,
+                    "ciclo": int,
+                    "creditos": int,
+                    "categoria": str,
+                    "prerequisitos": [str]
+                },
+                ...
+            ],
+            "especialidad_detectada": str | None,
+            "debug": {
+                "candidatas_iniciales_count": int,
+                "eliminadas_regla_a": int,
+                "eliminadas_regla_b": int,
+                "eliminadas_regla_c": int,
+                "eliminadas_regla_d": int
+            }
         }
     """
-    # Cargar mapa curricular
-    ruta_proyecto = Path(__file__).parent.parent
-    ruta_mapa = ruta_proyecto / "data" / "mapa_curricular_2021ID_real_completo.json"
     
-    if not ruta_mapa.exists():
-        raise FileNotFoundError(f"Mapa curricular no encontrado en {ruta_mapa}")
+    # Cargar mapa si no se pasó
+    if mapa_curricular is None:
+        mapa_curricular = cargar_mapa_curricular(plan_estudios)
     
-    mapa_curricular = cargar_mapa_curricular(str(ruta_mapa))
+    if not mapa_curricular:
+        return {
+            "ciclo_actual": 0,
+            "candidatas_count": 0,
+            "candidatas_claves": [],
+            "candidatas_detalles": [],
+            "error": "No se pudo cargar el mapa curricular"
+        }
     
-    # Crear motor experto
-    motor = SistemaExpertoSeriacion(mapa_curricular)
-
-    # Cargar oferta académica vigente (opcional)
-    oferta_claves = set()
-    periodo_oferta_utilizado = None
-    if usar_oferta_academica:
-        ruta_oferta = ruta_proyecto / "agents" / "OfertaAcademica"
-        oferta_claves, periodo_oferta_utilizado = cargar_oferta_academica_vigente(
-            ruta_oferta=ruta_oferta,
-            plan_estudios=plan_estudios,
-            periodo_objetivo=periodo_oferta
-        )
-        if periodo_oferta_utilizado:
-            print(
-                f"[OFERTA] Periodo {periodo_oferta_utilizado}: "
-                f"{len(oferta_claves)} materias ofertadas"
-            )
-    
-    # Convertir historial a objetos
-    historial = [
-        MateriaAprobada(
-            clave=h["clave_materia"],
-            calificacion=h.get("calificacion", 0.0),
-            creditos_obtenidos=h.get("creditos_obtenidos", 0)
-        )
-        for h in historial_academico
-    ]
-    
-    # Ejecutar sistema
-    resultado = motor.ejecutar(
-        historial,
-        materias_en_curso=materias_en_curso or [],
-        oferta_claves=oferta_claves
-    )
-
-    resultado["periodo_oferta"] = periodo_oferta_utilizado
-    resultado["temporada_oferta"] = nombre_temporada_periodo(periodo_oferta_utilizado)
-    resultado["total_materias_ofertadas"] = len(oferta_claves)
-    
-    return resultado
-
-
-if __name__ == "__main__":
-    # Ejemplo de uso
-    print("=" * 70)
-    print("SISTEMA EXPERTO DE SERIACIÓN CURRICULAR - PLAN 2021 IDeIO")
-    print("=" * 70)
-    
-    # Estudiante de prueba
-    datos_est = {
-        "id": "EST001",
-        "nombre": "Juan Pérez",
-        "promedio": 8.5,
-        "total_creditos": 0
+    # =========================================================================
+    # PASO 1: Extraer información del historial (NORMALIZAR a UPPERCASE)
+    # =========================================================================
+    aprobadas = {
+        str(mat.get("clave", "")).strip().upper() 
+        for mat in historial_academico 
+        if mat.get("estatus", "").upper() == "APROBADA"
     }
     
-    # Historial académico de prueba (ciclo 1 completado)
-    historial = [
-        {"clave_materia": "ID0001", "calificacion": 9.0, "creditos_obtenidos": 6},
-        {"clave_materia": "ID0101", "calificacion": 8.5, "creditos_obtenidos": 8},
-        {"clave_materia": "ID0102", "calificacion": 9.0, "creditos_obtenidos": 8},
-        {"clave_materia": "ID0103", "calificacion": 8.0, "creditos_obtenidos": 8},
-        {"clave_materia": "ID0104", "calificacion": 8.5, "creditos_obtenidos": 8},
-        {"clave_materia": "ID0105", "calificacion": 7.5, "creditos_obtenidos": 8},
-        {"clave_materia": "ID0106", "calificacion": 9.0, "creditos_obtenidos": 6},
-        {"clave_materia": "ID0107", "calificacion": 8.5, "creditos_obtenidos": 3},
-    ]
+    en_curso = {
+        str(mat.get("clave", "")).strip().upper() 
+        for mat in historial_academico 
+        if mat.get("estatus", "").upper() in ["EN_CURSO", "RECURSANDO"]
+    }
     
-    # Ejecutar
-    resultado = ejecutar_sistema_experto(datos_est, historial)
+    # =========================================================================
+    # PASO 2: Determinar ciclo actual
+    # =========================================================================
+    ciclo_actual = detectar_ciclo_actual(historial_academico, mapa_curricular)
     
-    print("\n" + "=" * 70)
-    print(f"CICLO RECOMENDADO: {resultado['ciclo_recomendado']}")
-    print(f"MATERIAS RECOMENDADAS: {resultado['total_materias_recomendadas']}")
-    print("=" * 70)
+    # =========================================================================
+    # PASO 3: Generar candidatas iniciales
+    # =========================================================================
+    candidatas = generar_candidatas_iniciales(
+        ciclo_actual, mapa_curricular, aprobadas, en_curso
+    )
+    count_iniciales = len(candidatas)
     
-    for mat in resultado["materias_recomendadas"][:5]:
-        print(f"  {mat['clave']} - {mat['nombre']}")
-        print(f"    Ciclo: {mat['ciclo']} | Créditos: {mat['creditos']} | Categoría: {mat['categoria']}")
+    # =========================================================================
+    # PASO 4: Aplicar REGLA A - Validar prerequisitos
+    # =========================================================================
+    candidatas_antes_b = len(candidatas)
+    candidatas = aplicar_regla_a_prerequisitos(candidatas, aprobadas, mapa_curricular)
+    count_eliminadas_a = candidatas_antes_b - len(candidatas)
     
-    if resultado["alertas"]:
-        print("\n⚠️  ALERTAS:")
-        for alerta in resultado["alertas"]:
-            print(f"  [{alerta['tipo']}] {alerta['descripcion']}")
+    # =========================================================================
+    # PASO 5: Aplicar REGLA B - Eliminar cadenas
+    # =========================================================================
+    candidatas_antes_b = len(candidatas)
+    candidatas = aplicar_regla_b_cadenas(candidatas, mapa_curricular)
+    count_eliminadas_b = candidatas_antes_b - len(candidatas)
+
+    # =========================================================================
+    # PASO 6: Aplicar REGLA C - Cuota de Elección Libre
+    # =========================================================================
+    candidatas, count_eliminadas_c = aplicar_regla_c_cuota_el(
+        candidatas, aprobadas, mapa_curricular
+    )
+
+    # =========================================================================
+    # PASO 7: Aplicar REGLA D - Filtro de Preespecialidad
+    # =========================================================================
+    candidatas, count_eliminadas_d, especialidad_detectada = aplicar_regla_d_preespecialidad(
+        candidatas, aprobadas, mapa_curricular, plan_estudios
+    )
+
+    # =========================================================================
+    # PASO 8: Aplicar REGLA E - Filtro de Prácticas Preespecialidad
+    # =========================================================================
+    candidatas, count_eliminadas_e = aplicar_regla_e_practicas_preespecialidad(
+        candidatas, aprobadas, en_curso, especialidad_detectada, plan_estudios
+    )
+
+    # =========================================================================
+    # PASO 9: Enriquecer resultado
+    # =========================================================================
+    detalles = []
+    for clave in sorted(candidatas):
+        clave = str(clave).strip().upper()  # NORMALIZAR
+        materia_info = next(
+            (m for m in mapa_curricular if str(m.get("clave", "")).strip().upper() == clave),
+            None
+        )
+        
+        if materia_info:
+            requisitos = obtener_prerequisitos(clave, mapa_curricular)
+            detalles.append({
+                "clave": clave,
+                "nombre": materia_info.get("nombre", "Desconocido"),
+                "ciclo": materia_info.get("ciclo", 0),
+                "creditos": materia_info.get("creditos", 0),
+                "categoria": materia_info.get("categoria", ""),
+                "prerequisitos": sorted(list(requisitos))
+            })
+    
+    return {
+        "ciclo_actual": ciclo_actual,
+        "candidatas_count": len(candidatas),
+        "candidatas_claves": sorted(list(candidatas)),
+        "candidatas_detalles": detalles,
+        "especialidad_detectada": especialidad_detectada,
+        "debug": {
+            "candidatas_iniciales_count": count_iniciales,
+            "eliminadas_regla_a": count_eliminadas_a,
+            "eliminadas_regla_b": count_eliminadas_b,
+            "eliminadas_regla_c": count_eliminadas_c,
+            "eliminadas_regla_d": count_eliminadas_d,
+            "eliminadas_regla_e": count_eliminadas_e
+        }
+    }

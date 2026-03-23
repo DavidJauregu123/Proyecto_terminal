@@ -67,3 +67,6 @@ logs/
 # OS
 Thumbs.db
 .DS_Store
+
+# Office temporales
+~$*.xlsx

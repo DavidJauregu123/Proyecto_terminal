@@ -19,15 +19,23 @@ class ProgresoCiclo:
 class AcademicProcessor:
     """Procesa datos académicos para generar reportes y análisis"""
     
-    def __init__(self, mapa_curricular: Dict[str, Dict]):
+    def __init__(self, mapa_curricular):
         """
-        Inicializa el procesador
-        
+        Inicializa el procesador.
+
         Args:
-            mapa_curricular: Diccionario con estructura del mapa curricular
-                            {clave_materia: {ciclo, categoria, creditos, ...}}
+            mapa_curricular: dict {clave: {ciclo, ...}} o list [{clave, ciclo, ...}]
         """
-        self.mapa_curricular = mapa_curricular
+        if isinstance(mapa_curricular, list):
+            self.mapa_curricular = {
+                m.get("clave", ""): m
+                for m in mapa_curricular
+                if isinstance(m, dict) and m.get("clave")
+            }
+        elif isinstance(mapa_curricular, dict):
+            self.mapa_curricular = mapa_curricular
+        else:
+            self.mapa_curricular = {}
     
     def calcular_progreso_por_ciclo(self, historial_df: pd.DataFrame) -> Dict[int, ProgresoCiclo]:
         """
@@ -67,13 +75,25 @@ class AcademicProcessor:
                 progreso_por_ciclo[ciclo]["reprobadas"] += 1
         
         # Contar materias pendientes por ciclo (del mapa curricular)
-        for ciclo in range(1, 5):
+        # Solo se cuentan BÁSICAS (no PID) como pendientes obligatorias.
+        # Las EL y PREESPECIALIDAD no son obligatorias de forma individual
+        # (el alumno elige cuáles tomar), por lo que no inflan el conteo.
+        ciclos_en_mapa = sorted(set(
+            info.get("ciclo", 0)
+            for info in self.mapa_curricular.values()
+            if info.get("ciclo", 0) > 0
+        ))
+        for ciclo in ciclos_en_mapa:
             if ciclo not in progreso_por_ciclo:
                 progreso_por_ciclo[ciclo] = {"finalizadas": 0, "en_curso": 0, "reprobadas": 0, "recursando": 0, "pendientes": 0, "total": 0}
 
-            # Materias que deberían estar en este ciclo
-            materias_del_ciclo = [m for m, info in self.mapa_curricular.items() if info.get("ciclo") == ciclo]
-            # Materias pendientes = que están en el ciclo pero no han sido cursadas
+            # Solo BÁSICAS no-PID cuentan como materias obligatorias pendientes
+            materias_del_ciclo = [
+                m for m, info in self.mapa_curricular.items()
+                if info.get("ciclo") == ciclo
+                and info.get("categoria") == "BASICA"
+                and not str(m).strip().upper().startswith("PID")
+            ]
             materias_no_cursadas = [m for m in materias_del_ciclo if m not in materias_cursadas]
             progreso_por_ciclo[ciclo]["pendientes"] = len(materias_no_cursadas)
             progreso_por_ciclo[ciclo]["total"] += len(materias_no_cursadas)
@@ -206,7 +226,61 @@ class AcademicProcessor:
                 "descripcion": f"El estudiante tiene {total_reprobadas_activas} materia(s) reprobada(s) pendiente(s) de regularizar: {detalle_reprobadas}",
                 "severidad": "ADVERTENCIA"
             })
-        
+
+        # Regla 3: Atraso en Prácticas Profesionales
+        # Determinar semestre actual basado en el historial
+        aprobadas_set = set(
+            str(row["clave"]).strip().upper()
+            for _, row in historial_df.iterrows()
+            if row.get("estatus", "").upper() == "APROBADA"
+        )
+        en_curso_set = set(
+            str(row["clave"]).strip().upper()
+            for _, row in historial_df.iterrows()
+            if row.get("estatus", "").upper() in ["EN_CURSO", "RECURSANDO"]
+        )
+        cursadas_set = aprobadas_set | en_curso_set
+
+        # Estimar ciclo_anual actual mirando qué ciclos anuales tiene el estudiante activos
+        # Usamos el mapa curricular para obtener el ciclo_anual de las materias cursadas
+        ciclo_anual_actual = 1
+        for _, row in historial_df.iterrows():
+            clave = str(row.get("clave", "")).strip().upper()
+            if clave.startswith("PID"):
+                continue
+            if row.get("estatus", "").upper() in ("APROBADA", "EN_CURSO", "RECURSANDO"):
+                info = self.mapa_curricular.get(clave, {})
+                ca = info.get("ciclo_anual", 0)
+                if isinstance(ca, int) and ca > ciclo_anual_actual:
+                    ciclo_anual_actual = ca
+
+        pid0201_ok = "PID0201" in cursadas_set
+        pid0302_ok = "PID0302" in cursadas_set
+
+        # PID0201 debía completarse en ciclo_anual 2 (sems 3-4)
+        if not pid0201_ok:
+            if ciclo_anual_actual >= 4:
+                alertas.append({
+                    "tipo": "ATRASO_PRÁCTICAS_I",
+                    "descripcion": "El estudiante va en el ciclo anual 4 (semestres 7-8) y aún no ha cursado Prácticas Profesionales I (PID0201), que debió completarse en el ciclo anual 2. Atraso de 2 o más años.",
+                    "severidad": "CRITICA"
+                })
+            elif ciclo_anual_actual >= 3:
+                alertas.append({
+                    "tipo": "ATRASO_PRÁCTICAS_I",
+                    "descripcion": "El estudiante va en el ciclo anual 3 (semestres 5-6) y aún no ha cursado Prácticas Profesionales I (PID0201), que debió completarse en el ciclo anual 2. Atraso de 1 año.",
+                    "severidad": "ADVERTENCIA"
+                })
+
+        # PID0302 debía completarse en ciclo_anual 3 (sems 5-6)
+        if not pid0302_ok:
+            if ciclo_anual_actual >= 4:
+                alertas.append({
+                    "tipo": "ATRASO_PRÁCTICAS_II",
+                    "descripcion": "El estudiante va en el ciclo anual 4 (semestres 7-8) y aún no ha cursado Prácticas Profesionales II (PID0302), que debió completarse en el ciclo anual 3. Atraso de 1 año.",
+                    "severidad": "ADVERTENCIA"
+                })
+
         return alertas
     
     def calcular_requisitos_adicionales(self) -> Dict[str, bool]:

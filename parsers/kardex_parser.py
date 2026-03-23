@@ -59,10 +59,10 @@ class KardexParser:
             materias = self._extraer_materias_texto(texto_completo)
             totales = self._extraer_totales(texto_completo)
             
-            # Asignar ciclo desde el mapa curricular oficial (no por orden cronológico)
+            # Asignar ciclo desde el mapa curricular oficial (semestres 1-8)
             import json
             from pathlib import Path as _Path
-            mapa_path = _Path(__file__).parent.parent / "data" / "mapa_curricular_2021ID.json"
+            mapa_path = _Path(__file__).parent.parent / "data" / "mapa_curricular_2021ID_real_completo.json"
             mapa_curricular_local = {}
             if mapa_path.exists():
                 with open(mapa_path, "r", encoding="utf-8") as _f:
@@ -147,9 +147,15 @@ class KardexParser:
         # NOTA: Usar [ \t] en las partes opcionales finales para NO consumir \n
         # Si se usa \s+ ahí, el regex come el newline y se traga la siguiente línea
         patron = re.compile(
-            r'^\*?([A-Z]{2,4}\d{4})\s+(.+?)\s+(\d{6})\s+OP\d+\s+(\S+?)(?:[ \t]+(\d+))?(?:[ \t]+.*)?$',
+            r'^(?:BTT\s+)?\*?([A-Z]{2,4}\d{4})\s+(.+?)\s+(\d{6})\s+OP\d+\s+(\S+?)(?:[ \t]+(\d+))?(?:[ \t]+.*)?$',
             re.MULTILINE
         )
+        # Detectar líneas BTT para marcarlas como BAJA_TEMPORAL
+        patron_btt = re.compile(
+            r'^BTT\s+\*?[A-Z]{2,4}\d{4}\s+.+?\s+(\d{6})\s+OP\d+',
+            re.MULTILINE
+        )
+        periodos_btt = set(m.group(1) for m in patron_btt.finditer(texto))
 
         # Encontrar el ÚLTIMO PERÍODO
         periodo_patron = re.compile(r'\d{6}')
@@ -163,8 +169,23 @@ class KardexParser:
             campo4 = match.group(4).strip()
             campo5 = match.group(5)
             linea = match.group(0)
-            tiene_asterisco = linea.lstrip().startswith("*")
+            es_btt = linea.lstrip().upper().startswith("BTT")
+            tiene_asterisco = linea.lstrip().startswith("*") or (
+                es_btt and "*" in linea.split(clave)[0]
+            )
             es_ultimo_periodo = (periodo == ultimo_periodo)
+
+            # BTT = Baja Temporal a Tiempo: el estudiante se dio de baja
+            # de este periodo. No cuenta como cursada ni como reprobada.
+            if es_btt:
+                calificacion = None
+                creditos_val = 0
+                materias.append(MateriaKardex(
+                    clave=clave, nombre=nombre, periodo=periodo,
+                    ciclo=0, calificacion=calificacion,
+                    creditos=creditos_val, estatus="BAJA_TEMPORAL"
+                ))
+                continue
 
             # Determinar si campo4 es calificación o créditos
             campo4_es_numero = False
