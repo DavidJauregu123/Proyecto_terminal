@@ -1119,94 +1119,75 @@ def main():
                 st.divider()
                 with st.expander("¿Cómo se eligieron estas materias?", expanded=False):
 
-                    lineas = []
-
-                    # 1. Semestre y punto de partida
-                    lineas.append(
-                        f"**Semestre detectado: {ciclo_act}**  \
-\nEl sistema revisaó tu avance semestre por semestre. Para avanzar de semestre "
-                        f"se requiere haber cubierto al menos el 75\xa0% de las materias básicas de ese semestre. "
-                        f"Cumpliste ese umbral en todos los semestres anteriores al {ciclo_act}, por lo que te ubica en ese punto."
+                    # Resumen breve del proceso
+                    final_count = resultado.get("candidatas_count", 0)
+                    st.markdown(
+                        f"Se analizaron **{ini_count}** materias candidatas y después de aplicar "
+                        f"las reglas de seriación quedaron **{final_count}**. "
+                        f"A continuación se explica por qué se recomienda cada una:"
                     )
+                    st.markdown("")
 
-                    lineas.append(
-                        f"**Punto de partida: {ini_count} materias**  \
-\nSe tomaron como candidatas iniciales todas las materias del semestre {ciclo_act} "
-                        f"y del semestre {ciclo_act + 1} que aún no tienes aprobadas ni en curso."
-                    ) if ciclo_act < 8 else lineas.append(
-                        f"**Punto de partida: {ini_count} materias**  \
-\nSe tomaron como candidatas iniciales todas las materias del semestre {ciclo_act} "
-                        f"que aún no tienes aprobadas ni en curso."
-                    )
+                    # Colores por nivel de prioridad
+                    _colores_nivel = {
+                        1: "#e8f5e9",   # verde claro — prereq aprobado
+                        2: "#fff3e0",   # naranja claro — reprobadas
+                        3: "#e3f2fd",   # azul claro — básicas anteriores
+                        4: "#f3e5f5",   # morado claro — elección libre
+                        5: "#fce4ec",   # rosa claro — talleres
+                    }
 
-                    # 2. Filtros que realmente eliminaron materias
-                    if elim_a > 0:
-                        lineas.append(
-                            f"**Prerequisitos no cumplidos: se eliminaron {elim_a} materia(s)**  \
-\n"
-                            f"Cada una de esas materias requiere que apruebes primero otra u otras que aún tienes pendientes."
-                        )
-                    if elim_b > 0:
-                        lineas.append(
-                            f"**Cadenas de seriación: se eliminaron {elim_b} materia(s)**  \
-\n"
-                            f"Algunas materias forman secuencias (por ejemplo, Cálculo I → II → III). "
-                            f"Si el eslabón previo no está aprobado, la materia más avanzada se descarta."
-                        )
-                    if elim_c > 0:
-                        lineas.append(
-                            f"**Cuota de Elección Libre: se ajustaron {elim_c} materia(s)**  \
-\n"
-                            f"El plan de estudios tiene un número recomendado de materias de Elección Libre por ciclo anual. "
-                            f"Ya alcanzaste esa cuota en uno o más ciclos, por lo que las optativas sobrantes se retiraron."
-                        )
+                    # Agrupar candidatas por (nivel, razon)
+                    from collections import OrderedDict
+                    grupos = OrderedDict()
+                    for det in candidatas_detalles:
+                        key = (det.get("prioridad", 99), det.get("nivel", "Otras"), det.get("razon", ""))
+                        if key not in grupos:
+                            grupos[key] = []
+                        grupos[key].append(det)
 
-                    # 3. Pre-especialidades
-                    if esp:
-                        if elim_d > 0:
-                            lineas.append(
-                                f"**Pre-especialidad: se eliminaron {elim_d} materia(s) de la otra línea**  \
-\n"
-                                f"Dado que todas tus materias de pre-especialidad aprobadas pertenecen a **{esp}**, "
-                                f"el sistema descartó las materias de la otra especialidad para no desviar tu trayectoria."
+                    for (prio, nivel_nombre, razon), materias_grupo in grupos.items():
+                        color = _colores_nivel.get(prio, "#f5f5f5")
+
+                        if len(materias_grupo) == 1:
+                            m = materias_grupo[0]
+                            st.markdown(
+                                f"<div style='background:{color}; padding:10px 14px; "
+                                f"border-radius:8px; margin-bottom:8px; border-left:4px solid {color.replace('e','9').replace('f','b')};'>"
+                                f"<strong>{m['clave']} — {m['nombre']}</strong> "
+                                f"<span style='color:#666; font-size:0.9em;'>(Ciclo {m['ciclo']} · {m['creditos']} cr)</span><br>"
+                                f"<span style='font-size:0.92em;'>{razon}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True
                             )
                         else:
-                            lineas.append(
-                                f"**Pre-especialidad detectada: {esp}**  \
-\n"
-                                f"El sistema identificó que te has enfocado en esta línea, pero no fue necesario eliminar "
-                                f"ninguna materia candidata adicional."
+                            lista_html = "".join(
+                                f"<li><strong>{m['clave']}</strong> — {m['nombre']} "
+                                f"<span style='color:#666; font-size:0.9em;'>(Ciclo {m['ciclo']} · {m['creditos']} cr)</span></li>"
+                                for m in materias_grupo
                             )
-                    else:
-                        # Verificar si hay avance en ambas o en ninguna
-                        if elim_d == 0 and ini_count > 0:
-                            lineas.append(
-                                "**Pre-especialidades: se muestran materias de ambas líneas**  \n"
-                                "Aún no tienes materias aprobadas exclusivamente en una sola especialidad, "
-                                "por lo que el sistema incluye candidatas de ambas pre-especialidades. "
-                                "Cuando te concentres en una, la otra dejará de aparecer en futuras recomendaciones."
+                            st.markdown(
+                                f"<div style='background:{color}; padding:10px 14px; "
+                                f"border-radius:8px; margin-bottom:8px; border-left:4px solid {color.replace('e','9').replace('f','b')};'>"
+                                f"<strong>{nivel_nombre}</strong> — "
+                                f"<span style='font-size:0.92em;'>{razon}</span>"
+                                f"<ul style='margin:6px 0 2px 0;'>{lista_html}</ul>"
+                                f"</div>",
+                                unsafe_allow_html=True
                             )
 
-                    if elim_e > 0:
-                        lineas.append(
-                            f"**Prácticas de pre-especialidad: se eliminaron {elim_e} practica(s)**  \
-\n"
-                            f"Las prácticas de pre-especialidad requieren que hayas aprobado al menos 3 materias "
-                            f"de esa línea. Aún no se alcanzan esos requisitos."
-                        )
-
-                    # 4. Resultado
-                    final_count = resultado.get("candidatas_count", 0)
-                    lineas.append(
-                        f"**Resultado: {final_count} materia(s) recomendadas**  \
-\n"
-                        f"Las materias de la tabla son las que puedes inscribir ahora mismo según tu historial "
-                        f"y las reglas de seriación de tu plan de estudios."
-                    )
-
-                    for linea in lineas:
-                        st.markdown(linea)
+                    # Resumen de filtros aplicados
+                    filtros_activos = []
+                    if elim_a > 0: filtros_activos.append(f"Prerequisitos no cumplidos: -{elim_a}")
+                    if elim_b > 0: filtros_activos.append(f"Cadenas de seriación: -{elim_b}")
+                    if elim_c > 0: filtros_activos.append(f"Cuota de Elección Libre: -{elim_c}")
+                    if elim_d > 0: filtros_activos.append(f"Pre-especialidad ({esp or 'detectada'}): -{elim_d}")
+                    if elim_e > 0: filtros_activos.append(f"Prácticas pre-especialidad: -{elim_e}")
+                    if filtros_activos:
                         st.markdown("")
+                        st.markdown(
+                            "**Materias descartadas:** " + " · ".join(filtros_activos)
+                        )
 
 
     # ===================================================================

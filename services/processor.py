@@ -241,48 +241,73 @@ class AcademicProcessor:
         )
         cursadas_set = aprobadas_set | en_curso_set
 
-        # Estimar ciclo_anual actual mirando qué ciclos anuales tiene el estudiante activos
-        # Usamos el mapa curricular para obtener el ciclo_anual de las materias cursadas
-        ciclo_anual_actual = 1
-        for _, row in historial_df.iterrows():
-            clave = str(row.get("clave", "")).strip().upper()
-            if clave.startswith("PID"):
-                continue
-            if row.get("estatus", "").upper() in ("APROBADA", "EN_CURSO", "RECURSANDO"):
-                info = self.mapa_curricular.get(clave, {})
-                ca = info.get("ciclo_anual", 0)
-                if isinstance(ca, int) and ca > ciclo_anual_actual:
-                    ciclo_anual_actual = ca
+        # Estimar semestre actual contando periodos hábiles (01/03) del historial
+        # Excluir periodos de vacaciones (02/04) y periodos BTT
+        periodos_habiles = set()
+        if "periodo" in historial_df.columns:
+            for _, row in historial_df.iterrows():
+                p = str(row.get("periodo", "")).strip()
+                estatus = str(row.get("estatus", "")).upper()
+                if estatus == "BTT":
+                    continue
+                if len(p) == 6 and p.isdigit() and p[4:] in ("01", "03"):
+                    periodos_habiles.add(p)
+        semestre_actual_alertas = max(1, len(periodos_habiles))
+        ciclo_anual_actual = max(1, (semestre_actual_alertas + 1) // 2)
 
         pid0201_ok = "PID0201" in cursadas_set
         pid0302_ok = "PID0302" in cursadas_set
 
         # PID0201 debía completarse en ciclo_anual 2 (sems 3-4)
         if not pid0201_ok:
-            if ciclo_anual_actual >= 4:
+            if semestre_actual_alertas >= 7:
                 alertas.append({
                     "tipo": "ATRASO_PRÁCTICAS_I",
-                    "descripcion": "El estudiante va en el ciclo anual 4 (semestres 7-8) y aún no ha cursado Prácticas Profesionales I (PID0201), que debió completarse en el ciclo anual 2. Atraso de 2 o más años.",
+                    "descripcion": f"El estudiante va en el semestre {semestre_actual_alertas} y aún no ha cursado Prácticas Profesionales I (PID0201), que debió completarse entre los semestres 3-4. Atraso considerable.",
                     "severidad": "CRITICA"
                 })
-            elif ciclo_anual_actual >= 3:
+            elif semestre_actual_alertas >= 5:
                 alertas.append({
                     "tipo": "ATRASO_PRÁCTICAS_I",
-                    "descripcion": "El estudiante va en el ciclo anual 3 (semestres 5-6) y aún no ha cursado Prácticas Profesionales I (PID0201), que debió completarse en el ciclo anual 2. Atraso de 1 año.",
+                    "descripcion": f"El estudiante va en el semestre {semestre_actual_alertas} y aún no ha cursado Prácticas Profesionales I (PID0201), que debió completarse entre los semestres 3-4.",
                     "severidad": "ADVERTENCIA"
                 })
 
         # PID0302 debía completarse en ciclo_anual 3 (sems 5-6)
         if not pid0302_ok:
-            if ciclo_anual_actual >= 4:
+            if semestre_actual_alertas >= 7:
                 alertas.append({
                     "tipo": "ATRASO_PRÁCTICAS_II",
-                    "descripcion": "El estudiante va en el ciclo anual 4 (semestres 7-8) y aún no ha cursado Prácticas Profesionales II (PID0302), que debió completarse en el ciclo anual 3. Atraso de 1 año.",
+                    "descripcion": f"El estudiante va en el semestre {semestre_actual_alertas} y aún no ha cursado Prácticas Profesionales II (PID0302), que debió completarse entre los semestres 5-6.",
                     "severidad": "ADVERTENCIA"
                 })
 
+        # Regla 4: Prerequisitos saltados — materias aprobadas sin haber aprobado sus requisitos
+        for clave_apr in aprobadas_set:
+            info = self.mapa_curricular.get(clave_apr, {})
+            requisitos = info.get("requisitos", []) or []
+            if isinstance(requisitos, str):
+                requisitos = [requisitos]
+            for req in requisitos:
+                req_upper = req.strip().upper()
+                if not req_upper:
+                    continue
+                if req_upper not in aprobadas_set:
+                    nombre_apr = nombres_materias.get(clave_apr, "") or info.get("nombre", "")
+                    info_req = self.mapa_curricular.get(req_upper, {})
+                    nombre_req = nombres_materias.get(req_upper, "") or info_req.get("nombre", req_upper)
+                    alertas.append({
+                        "tipo": "PREREQUISITO_SALTADO",
+                        "descripcion": (
+                            f"El estudiante aprobó {clave_apr} - {nombre_apr} "
+                            f"sin haber aprobado su prerequisito {req_upper} - {nombre_req}. "
+                            f"Verificar con coordinación académica."
+                        ),
+                        "severidad": "ADVERTENCIA"
+                    })
+
         return alertas
-    
+
     def calcular_requisitos_adicionales(self) -> Dict[str, bool]:
         """
         Calcula el estado de requisitos adicionales
