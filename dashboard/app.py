@@ -917,9 +917,10 @@ def main():
     creditos_faltantes = max(0, creditos_totales - creditos_acumulados)
 
     # ========== PESTAÑAS PRINCIPALES ==========
-    tab_historia_main, tab_experto_main, tab_mapa_main, tab_pruebas_main = st.tabs([
+    tab_historia_main, tab_experto_main, tab_cargas_main, tab_mapa_main, tab_pruebas_main = st.tabs([
         "🗂️ Historia Académica",
         "🧠 Sistema Experto",
+        "📅 Generador de Cargas",
         "📋 Mapa Curricular",
         "🔬 Pruebas",
     ])
@@ -999,6 +1000,9 @@ def main():
                     mapa_curricular=mapa_curricular,
                     plan_estudios=plan_estudios
                 )
+
+                # Guardar para pestaña de generador de cargas
+                st.session_state.resultado_experto = resultado
 
                 debug_info = resultado.get("debug", {})
                 sem_cursado = resultado.get("semestre_cursado", 0)
@@ -1119,94 +1123,75 @@ def main():
                 st.divider()
                 with st.expander("¿Cómo se eligieron estas materias?", expanded=False):
 
-                    lineas = []
-
-                    # 1. Semestre y punto de partida
-                    lineas.append(
-                        f"**Semestre detectado: {ciclo_act}**  \
-\nEl sistema revisaó tu avance semestre por semestre. Para avanzar de semestre "
-                        f"se requiere haber cubierto al menos el 75\xa0% de las materias básicas de ese semestre. "
-                        f"Cumpliste ese umbral en todos los semestres anteriores al {ciclo_act}, por lo que te ubica en ese punto."
+                    # Resumen breve del proceso
+                    final_count = resultado.get("candidatas_count", 0)
+                    st.markdown(
+                        f"Se analizaron **{ini_count}** materias candidatas y después de aplicar "
+                        f"las reglas de seriación quedaron **{final_count}**. "
+                        f"A continuación se explica por qué se recomienda cada una:"
                     )
+                    st.markdown("")
 
-                    lineas.append(
-                        f"**Punto de partida: {ini_count} materias**  \
-\nSe tomaron como candidatas iniciales todas las materias del semestre {ciclo_act} "
-                        f"y del semestre {ciclo_act + 1} que aún no tienes aprobadas ni en curso."
-                    ) if ciclo_act < 8 else lineas.append(
-                        f"**Punto de partida: {ini_count} materias**  \
-\nSe tomaron como candidatas iniciales todas las materias del semestre {ciclo_act} "
-                        f"que aún no tienes aprobadas ni en curso."
-                    )
+                    # Colores por nivel de prioridad
+                    _colores_nivel = {
+                        1: "#e8f5e9",   # verde claro — prereq aprobado
+                        2: "#fff3e0",   # naranja claro — reprobadas
+                        3: "#e3f2fd",   # azul claro — básicas anteriores
+                        4: "#f3e5f5",   # morado claro — elección libre
+                        5: "#fce4ec",   # rosa claro — talleres
+                    }
 
-                    # 2. Filtros que realmente eliminaron materias
-                    if elim_a > 0:
-                        lineas.append(
-                            f"**Prerequisitos no cumplidos: se eliminaron {elim_a} materia(s)**  \
-\n"
-                            f"Cada una de esas materias requiere que apruebes primero otra u otras que aún tienes pendientes."
-                        )
-                    if elim_b > 0:
-                        lineas.append(
-                            f"**Cadenas de seriación: se eliminaron {elim_b} materia(s)**  \
-\n"
-                            f"Algunas materias forman secuencias (por ejemplo, Cálculo I → II → III). "
-                            f"Si el eslabón previo no está aprobado, la materia más avanzada se descarta."
-                        )
-                    if elim_c > 0:
-                        lineas.append(
-                            f"**Cuota de Elección Libre: se ajustaron {elim_c} materia(s)**  \
-\n"
-                            f"El plan de estudios tiene un número recomendado de materias de Elección Libre por ciclo anual. "
-                            f"Ya alcanzaste esa cuota en uno o más ciclos, por lo que las optativas sobrantes se retiraron."
-                        )
+                    # Agrupar candidatas por (nivel, razon)
+                    from collections import OrderedDict
+                    grupos = OrderedDict()
+                    for det in candidatas_detalles:
+                        key = (det.get("prioridad", 99), det.get("nivel", "Otras"), det.get("razon", ""))
+                        if key not in grupos:
+                            grupos[key] = []
+                        grupos[key].append(det)
 
-                    # 3. Pre-especialidades
-                    if esp:
-                        if elim_d > 0:
-                            lineas.append(
-                                f"**Pre-especialidad: se eliminaron {elim_d} materia(s) de la otra línea**  \
-\n"
-                                f"Dado que todas tus materias de pre-especialidad aprobadas pertenecen a **{esp}**, "
-                                f"el sistema descartó las materias de la otra especialidad para no desviar tu trayectoria."
+                    for (prio, nivel_nombre, razon), materias_grupo in grupos.items():
+                        color = _colores_nivel.get(prio, "#f5f5f5")
+
+                        if len(materias_grupo) == 1:
+                            m = materias_grupo[0]
+                            st.markdown(
+                                f"<div style='background:{color}; padding:10px 14px; "
+                                f"border-radius:8px; margin-bottom:8px; border-left:4px solid {color.replace('e','9').replace('f','b')};'>"
+                                f"<strong>{m['clave']} — {m['nombre']}</strong> "
+                                f"<span style='color:#666; font-size:0.9em;'>(Ciclo {m['ciclo']} · {m['creditos']} cr)</span><br>"
+                                f"<span style='font-size:0.92em;'>{razon}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True
                             )
                         else:
-                            lineas.append(
-                                f"**Pre-especialidad detectada: {esp}**  \
-\n"
-                                f"El sistema identificó que te has enfocado en esta línea, pero no fue necesario eliminar "
-                                f"ninguna materia candidata adicional."
+                            lista_html = "".join(
+                                f"<li><strong>{m['clave']}</strong> — {m['nombre']} "
+                                f"<span style='color:#666; font-size:0.9em;'>(Ciclo {m['ciclo']} · {m['creditos']} cr)</span></li>"
+                                for m in materias_grupo
                             )
-                    else:
-                        # Verificar si hay avance en ambas o en ninguna
-                        if elim_d == 0 and ini_count > 0:
-                            lineas.append(
-                                "**Pre-especialidades: se muestran materias de ambas líneas**  \n"
-                                "Aún no tienes materias aprobadas exclusivamente en una sola especialidad, "
-                                "por lo que el sistema incluye candidatas de ambas pre-especialidades. "
-                                "Cuando te concentres en una, la otra dejará de aparecer en futuras recomendaciones."
+                            st.markdown(
+                                f"<div style='background:{color}; padding:10px 14px; "
+                                f"border-radius:8px; margin-bottom:8px; border-left:4px solid {color.replace('e','9').replace('f','b')};'>"
+                                f"<strong>{nivel_nombre}</strong> — "
+                                f"<span style='font-size:0.92em;'>{razon}</span>"
+                                f"<ul style='margin:6px 0 2px 0;'>{lista_html}</ul>"
+                                f"</div>",
+                                unsafe_allow_html=True
                             )
 
-                    if elim_e > 0:
-                        lineas.append(
-                            f"**Prácticas de pre-especialidad: se eliminaron {elim_e} practica(s)**  \
-\n"
-                            f"Las prácticas de pre-especialidad requieren que hayas aprobado al menos 3 materias "
-                            f"de esa línea. Aún no se alcanzan esos requisitos."
-                        )
-
-                    # 4. Resultado
-                    final_count = resultado.get("candidatas_count", 0)
-                    lineas.append(
-                        f"**Resultado: {final_count} materia(s) recomendadas**  \
-\n"
-                        f"Las materias de la tabla son las que puedes inscribir ahora mismo según tu historial "
-                        f"y las reglas de seriación de tu plan de estudios."
-                    )
-
-                    for linea in lineas:
-                        st.markdown(linea)
+                    # Resumen de filtros aplicados
+                    filtros_activos = []
+                    if elim_a > 0: filtros_activos.append(f"Prerequisitos no cumplidos: -{elim_a}")
+                    if elim_b > 0: filtros_activos.append(f"Cadenas de seriación: -{elim_b}")
+                    if elim_c > 0: filtros_activos.append(f"Cuota de Elección Libre: -{elim_c}")
+                    if elim_d > 0: filtros_activos.append(f"Pre-especialidad ({esp or 'detectada'}): -{elim_d}")
+                    if elim_e > 0: filtros_activos.append(f"Prácticas pre-especialidad: -{elim_e}")
+                    if filtros_activos:
                         st.markdown("")
+                        st.markdown(
+                            "**Materias descartadas:** " + " · ".join(filtros_activos)
+                        )
 
 
     # ===================================================================
@@ -1895,6 +1880,227 @@ def main():
                 st.info("No se detectaron materias de pre-especialidad en el historial.")
         except Exception as e:
             st.warning(f"Error al calcular pre-especialidades: {str(e)}")
+
+
+    # ===================================================================
+    # PESTAÑA GENERADOR DE CARGAS ACADÉMICAS
+    # ===================================================================
+    with tab_cargas_main:
+        st.header("📅 Generador de Cargas Académicas")
+        st.caption("Genera combinaciones óptimas de materias para tu próximo semestre usando optimización multi-objetivo (NSGA-III).")
+
+        from services.oferta_service import cargar_oferta_csv, filtrar_oferta_por_candidatas
+        from agents.generador_cargas import generar_cargas_nsga3
+
+        # Verificar que existan candidatas del sistema experto
+        if "resultado_experto" not in st.session_state or not st.session_state.resultado_experto:
+            st.info("Primero ve a la pestaña **Sistema Experto** para generar las materias candidatas.")
+        else:
+            resultado_exp = st.session_state.resultado_experto
+            candidatas_det = resultado_exp.get("candidatas_detalles", [])
+
+            if not candidatas_det:
+                st.warning("No hay materias candidatas. Revisa el Sistema Experto.")
+            else:
+                # --- Cargar oferta académica ---
+                df_oferta = cargar_oferta_csv()
+                if df_oferta.empty:
+                    st.error("No se encontró el archivo de oferta académica (CSV) en `agents/OfertaAcademica/`.")
+                else:
+                    secciones_disp = filtrar_oferta_por_candidatas(df_oferta, candidatas_det)
+
+                    if not secciones_disp:
+                        st.warning("Ninguna materia candidata tiene secciones disponibles en la oferta académica actual.")
+                    else:
+                        materias_en_oferta = len(set(s["clave"] for s in secciones_disp))
+                        st.success(f"Se encontraron **{len(secciones_disp)} secciones** de **{materias_en_oferta} materias** candidatas en la oferta académica.")
+
+                        # --- Configuración del estudiante ---
+                        st.subheader("⚙️ Configuración")
+
+                        # Detectar si es condicionado
+                        es_condicionado = False
+                        if hasattr(st.session_state, "datos_estudiante") and st.session_state.datos_estudiante:
+                            sit = str(getattr(st.session_state.datos_estudiante, "situacion", "")).upper()
+                            es_condicionado = "CONDICIONADO" in sit
+
+                        if es_condicionado:
+                            st.warning("⚠️ Estudiante **condicionado**: máximo 3 materias.")
+                            max_mat = 3
+                            materias_deseadas = st.slider("Materias deseadas", 1, 3, 3, key="cargas_mat_deseadas")
+                        else:
+                            max_mat = 8
+                            materias_deseadas = st.slider("Materias deseadas", 1, 8, 5, key="cargas_mat_deseadas")
+
+                        # --- Tabla de disponibilidad horaria (clickable) ---
+                        st.subheader("🕐 Disponibilidad Horaria")
+                        st.caption("Haz clic en las celdas para marcar (✓) o desmarcar (✗) tu disponibilidad.")
+
+                        import pandas as _pd_disp
+
+                        horas_rango = list(range(7, 22))  # 7:00 a 22:00
+                        dias_semana = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"]
+
+                        # Inicializar DataFrame de disponibilidad
+                        if "disp_df" not in st.session_state:
+                            data = {}
+                            for dia in dias_semana:
+                                if dia == "Sabado":
+                                    data[dia] = [False] * len(horas_rango)
+                                else:
+                                    data[dia] = [7 <= h < 17 for h in horas_rango]
+                            st.session_state.disp_df = _pd_disp.DataFrame(
+                                data, index=[f"{h:02d}:00" for h in horas_rango]
+                            )
+
+                        # Botones rápidos
+                        col_quick1, col_quick2, col_quick3, col_quick4 = st.columns(4)
+                        with col_quick1:
+                            if st.button("☀️ Matutino (7-14)", key="quick_mat"):
+                                for dia in dias_semana:
+                                    st.session_state.disp_df[dia] = [7 <= h < 14 and dia != "Sabado" for h in horas_rango]
+                                st.rerun()
+                        with col_quick2:
+                            if st.button("🌙 Vespertino (14-22)", key="quick_vesp"):
+                                for dia in dias_semana:
+                                    st.session_state.disp_df[dia] = [14 <= h < 22 and dia != "Sabado" for h in horas_rango]
+                                st.rerun()
+                        with col_quick3:
+                            if st.button("📅 Todo disponible", key="quick_todo"):
+                                for dia in dias_semana:
+                                    st.session_state.disp_df[dia] = [True] * len(horas_rango)
+                                st.rerun()
+                        with col_quick4:
+                            if st.button("🔄 Reiniciar", key="quick_reset"):
+                                for dia in dias_semana:
+                                    if dia == "Sabado":
+                                        st.session_state.disp_df[dia] = [False] * len(horas_rango)
+                                    else:
+                                        st.session_state.disp_df[dia] = [7 <= h < 17 for h in horas_rango]
+                                st.rerun()
+
+                        # Tabla editable — click para cambiar True/False
+                        edited_df = st.data_editor(
+                            st.session_state.disp_df,
+                            use_container_width=True,
+                            key="disp_editor",
+                            height=560,
+                        )
+                        st.session_state.disp_df = edited_df
+
+                        # Convertir DataFrame a dict {dia: [horas]}
+                        disp = {}
+                        for dia in dias_semana:
+                            disp[dia] = [
+                                horas_rango[i]
+                                for i, val in enumerate(edited_df[dia])
+                                if val
+                            ]
+
+                        horas_totales = sum(len(v) for v in disp.values())
+                        dias_activos = sum(1 for v in disp.values() if v)
+                        st.caption(f"**{horas_totales}** horas disponibles en **{dias_activos}** días")
+
+                        # --- Botón para generar cargas ---
+                        st.divider()
+
+                        if st.button("🚀 Generar Cargas Académicas", type="primary", key="btn_generar_cargas"):
+                            with st.spinner("Optimizando cargas con NSGA-III..."):
+                                cargas = generar_cargas_nsga3(
+                                    secciones_disponibles=secciones_disp,
+                                    disponibilidad=disp,
+                                    materias_deseadas=materias_deseadas,
+                                    max_materias=max_mat,
+                                    max_creditos=999,
+                                    poblacion_size=100,
+                                    generaciones=50,
+                                    n_resultados=3,
+                                )
+
+                            if not cargas:
+                                st.error("No se pudieron generar cargas válidas con tu disponibilidad horaria. Intenta ampliar tus horas disponibles.")
+                            else:
+                                st.session_state.cargas_generadas = cargas
+                                st.success(f"Se generaron **{len(cargas)} cargas** optimizadas.")
+
+                        # --- Mostrar resultados ---
+                        if "cargas_generadas" in st.session_state and st.session_state.cargas_generadas:
+                            cargas_gen = st.session_state.cargas_generadas
+
+                            for idx_carga, carga in enumerate(cargas_gen):
+                                etiqueta = carga.get("etiqueta", f"Carga {idx_carga + 1}")
+                                es_recomendada = idx_carga == 0
+
+                                with st.container():
+                                    if es_recomendada:
+                                        st.markdown(f"### ⭐ {etiqueta}")
+                                    else:
+                                        st.markdown(f"### 📋 {etiqueta}")
+
+                                    # Métricas
+                                    mc1, mc2, mc3, mc4 = st.columns(4)
+                                    mc1.metric("Materias", carga["total_materias"])
+                                    mc2.metric("Créditos", carga["total_creditos"])
+                                    mc3.metric("Prioridad", f"{carga['score_prioridad']:.0%}")
+                                    mc4.metric("Compacidad", f"{carga['score_compacidad']:.0%}")
+
+                                    # Tabla de materias
+                                    filas_carga = []
+                                    for sec in carga["secciones"]:
+                                        horario_str = ", ".join(
+                                            f"{b['dia'][:3]} {b['inicio']:02d}-{b['fin']:02d}"
+                                            for b in sec["horario"]
+                                        )
+                                        filas_carga.append({
+                                            "Clave": sec["clave"],
+                                            "Materia": sec["nombre"],
+                                            "Créditos": sec["creditos"],
+                                            "Nivel": sec["prioridad"],
+                                            "Horario": horario_str,
+                                            "Profesor": sec.get("profesor", ""),
+                                            "Razón": sec.get("razon", ""),
+                                        })
+
+                                    import pandas as _pd_cargas
+                                    df_carga_display = _pd_cargas.DataFrame(filas_carga)
+                                    st.dataframe(df_carga_display, use_container_width=True, hide_index=True)
+
+                                    # Horario visual
+                                    with st.expander("📅 Ver horario semanal"):
+                                        grid = {}
+                                        for sec in carga["secciones"]:
+                                            for bloque in sec["horario"]:
+                                                for h in range(bloque["inicio"], bloque["fin"]):
+                                                    key = (h, bloque["dia"])
+                                                    grid[key] = f"{sec['clave']}"
+
+                                        _dias_h = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"]
+                                        header_h = "".join(f'<th style="padding:4px 8px;text-align:center;font-size:12px;">{d[:3]}</th>' for d in _dias_h)
+                                        filas_h = []
+                                        _colores_mat = {}
+                                        _paleta = ["#dbeafe", "#fef3c7", "#d1fae5", "#fce7f3", "#e0e7ff", "#fde68a", "#ccfbf1", "#fbcfe8", "#c7d2fe"]
+                                        for h in range(7, 22):
+                                            celdas_h = ""
+                                            for dia in _dias_h:
+                                                val = grid.get((h, dia))
+                                                if val:
+                                                    if val not in _colores_mat:
+                                                        _colores_mat[val] = _paleta[len(_colores_mat) % len(_paleta)]
+                                                    bg = _colores_mat[val]
+                                                    celdas_h += f'<td style="background:{bg};text-align:center;padding:3px;font-size:11px;font-weight:bold;">{val}</td>'
+                                                else:
+                                                    celdas_h += '<td style="background:#f9fafb;text-align:center;padding:3px;font-size:10px;color:#ccc;">—</td>'
+                                            filas_h.append(f'<tr><td style="padding:3px 6px;font-size:11px;font-weight:bold;">{h:02d}:00</td>{celdas_h}</tr>')
+
+                                        tabla_horario = f"""
+                                        <table style="border-collapse:collapse;width:100%;">
+                                            <thead><tr><th style="padding:3px 6px;font-size:12px;">Hora</th>{header_h}</tr></thead>
+                                            <tbody>{"".join(filas_h)}</tbody>
+                                        </table>
+                                        """
+                                        st.markdown(tabla_horario, unsafe_allow_html=True)
+
+                                    st.divider()
 
 
     # ===================================================================
