@@ -12,30 +12,30 @@ from typing import Dict, List, Optional, Set
 DIAS = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"]
 
 COL_INICIO = {
-    "Lunes": "Lun I",
-    "Martes": "Mar I",
-    "Miercoles": "Mie I",
-    "Jueves": "Jue I",
-    "Viernes": "Vie I",
-    "Sabado": "Sab I",
+    "Lunes": "Lunes_I",
+    "Martes": "Martes_I",
+    "Miercoles": "Miercoles_I",
+    "Jueves": "Jueves_I",
+    "Viernes": "Viernes_I",
+    "Sabado": "Sabado_I",
 }
 
 COL_FIN = {
-    "Lunes": "Lun F",
-    "Martes": "Mar F",
-    "Miercoles": "Mar F.1",  # Bug en el CSV: columna duplicada
-    "Jueves": "Jue F",
-    "Viernes": "Vie F",
-    "Sabado": "Sab F",
+    "Lunes": "Lunes_F",
+    "Martes": "Martes_F",
+    "Miercoles": "Miercoles_F",
+    "Jueves": "Jueves_F",
+    "Viernes": "Viernes_F",
+    "Sabado": "Sabado_F",
 }
 
 COL_ESPACIO = {
-    "Lunes": "Espacio Lunes",
-    "Martes": "Espacio Martes",
-    "Miercoles": "Espacio Miercoles",
-    "Jueves": "Espacio Jueves",
-    "Viernes": "Espacio Viernes",
-    "Sabado": "Espacio Sabado",
+    "Lunes": "Lunes_Espacio",
+    "Martes": "Martes_Espacio",
+    "Miercoles": "Miercoles_Espacio",
+    "Jueves": "Jueves_Espacio",
+    "Viernes": "Viernes_Espacio",
+    "Sabado": "Sabado_Espacio",
 }
 
 
@@ -107,7 +107,7 @@ def cargar_oferta_csv(ruta_csv: Optional[str] = None) -> pd.DataFrame:
             ruta_csv = str(csvs[0])
 
     try:
-        df = pd.read_csv(ruta_csv, skiprows=1, encoding="latin-1")
+        df = pd.read_csv(ruta_csv, encoding="latin-1")
         df["Clave"] = df["Clave"].astype(str).str.strip().str.upper()
         return df
     except Exception as e:

@@ -33,17 +33,19 @@ def _peso_prioridad(prioridad: int) -> float:
     return 3 ** (5 - prioridad)
 
 
-def objetivo_prioridad(secciones_carga: List[Dict]) -> float:
+def objetivo_prioridad(secciones_carga: List[Dict], n_ref: int = 8) -> float:
     """
     Objetivo 1: Maximizar cobertura de prioridad.
     Suma de pesos exponenciales por cada materia incluida.
-    Se normaliza dividiendo entre el máximo teórico.
+    Normaliza contra un máximo FIJO (n_ref * 81) para que agregar más materias
+    siempre mejore o mantenga el score — no se penaliza tener materias de
+    prioridad baja si ya se tienen las de alta.
     """
     if not secciones_carga:
         return 0.0
     score = sum(_peso_prioridad(s["prioridad"]) for s in secciones_carga)
-    max_score = len(secciones_carga) * 81  # Máximo si todas fueran nivel 1
-    return score / max_score if max_score > 0 else 0.0
+    max_score = n_ref * 81  # Referencia fija: n_ref materias todas en prioridad 1
+    return min(1.0, score / max_score) if max_score > 0 else 0.0
 
 
 def objetivo_compacidad(secciones_carga: List[Dict]) -> float:
@@ -366,9 +368,9 @@ def generar_cargas_nsga3(
         objetivos = []
         for ind in poblacion:
             obj = (
-                1.0 - objetivo_prioridad(ind),       # Minimizar (invertido)
-                objetivo_compacidad(ind),              # Minimizar
-                objetivo_cantidad(ind, materias_deseadas),  # Minimizar
+                1.0 - objetivo_prioridad(ind, max_materias),  # Minimizar (invertido)
+                objetivo_compacidad(ind),                      # Minimizar
+                objetivo_cantidad(ind, materias_deseadas),     # Minimizar
             )
             objetivos.append(obj)
 
@@ -419,12 +421,13 @@ def generar_cargas_nsga3(
         if not es_carga_valida(ind, disponibilidad, max_materias, max_creditos, min_creditos):
             continue
 
-        score_pri = objetivo_prioridad(ind)
+        score_pri = objetivo_prioridad(ind, max_materias)
         score_comp = objetivo_compacidad(ind)
         score_cant = objetivo_cantidad(ind, materias_deseadas)
 
         # Score combinado ponderado (para ranking final)
-        score_total = 0.5 * score_pri + 0.3 * (1 - score_comp) + 0.2 * (1 - score_cant)
+        # Pesos: prioridad 40%, cantidad de materias 35%, compacidad 25%
+        score_total = 0.40 * score_pri + 0.35 * (1 - score_cant) + 0.25 * (1 - score_comp)
 
         evaluados.append({
             "secciones": sorted(ind, key=lambda s: (s["prioridad"], s["ciclo"])),
@@ -446,11 +449,61 @@ def generar_cargas_nsga3(
             break
         resultados.append(ev)
 
-    # Etiquetar
+    # --- Agregar recomendación de máxima cobertura (ignora prioridad) ---
+    # Greedy: agrega materias en orden de mayor secciones disponibles -> más fácil de encajar
+    _carga_max = []
+    _claves_max = set()
+    _cred_max = 0
+    # Orden: simplemente todas las materias disponibles, sin prioridad
+    for _clave_m in sorted(secciones_por_materia.keys()):
+        if len(_claves_max) >= max_materias:
+            break
+        if _clave_m in _claves_max:
+            continue
+        opciones_m = sorted(
+            secciones_por_materia[_clave_m],
+            key=lambda s: -len(s["horario"])  # preferir sección con más bloques (más info)
+        )
+        for _sec_m in opciones_m:
+            if _cred_max + _sec_m["creditos"] > max_creditos:
+                continue
+            if disponibilidad and not verificar_disponibilidad(_sec_m["horario"], disponibilidad):
+                continue
+            if any(verificar_choque_horario(_sec_m["horario"], e["horario"]) for e in _carga_max):
+                continue
+            _carga_max.append(_sec_m)
+            _claves_max.add(_clave_m)
+            _cred_max += _sec_m["creditos"]
+            break
+
+    if _carga_max and es_carga_valida(_carga_max, disponibilidad, max_materias, max_creditos, min_creditos):
+        _sp = objetivo_prioridad(_carga_max, max_materias)
+        _sc = objetivo_compacidad(_carga_max)
+        _sq = objetivo_cantidad(_carga_max, materias_deseadas)
+        _clave_max_key = tuple(sorted(s["clave"] for s in _carga_max))
+        # Solo agregar si no está ya entre los resultados (carga diferente)
+        _ya_incluida = any(
+            tuple(sorted(s["clave"] for s in r["secciones"])) == _clave_max_key
+            for r in resultados
+        )
+        if not _ya_incluida:
+            resultados.append({
+                "secciones": sorted(_carga_max, key=lambda s: (s["prioridad"], s["ciclo"])),
+                "total_materias": len(set(s["clave"] for s in _carga_max)),
+                "total_creditos": sum(s["creditos"] for s in _carga_max),
+                "score_prioridad": round(_sp, 3),
+                "score_compacidad": round(1 - _sc, 3),
+                "score_cantidad": round(1 - _sq, 3),
+                "score_total": round(0.40 * _sp + 0.35 * (1 - _sq) + 0.25 * (1 - _sc), 3),
+                "etiqueta": "Máxima cobertura",
+            })
+
+    # Etiquetar las demás
     etiquetas = ["Recomendada", "Alternativa 1", "Alternativa 2",
                  "Alternativa 3", "Alternativa 4"]
     for i, r in enumerate(resultados):
-        r["etiqueta"] = etiquetas[i] if i < len(etiquetas) else f"Alternativa {i}"
+        if "etiqueta" not in r:
+            r["etiqueta"] = etiquetas[i] if i < len(etiquetas) else f"Alternativa {i}"
 
     return resultados
 
@@ -513,7 +566,7 @@ def _generar_cargas_greedy(
                 for r in resultados
             )
             if not ya_existe:
-                score_pri = objetivo_prioridad(carga)
+                score_pri = objetivo_prioridad(carga, max_materias)
                 score_comp = objetivo_compacidad(carga)
                 score_cant = objetivo_cantidad(carga, materias_deseadas)
 
@@ -524,7 +577,7 @@ def _generar_cargas_greedy(
                     "score_prioridad": round(score_pri, 3),
                     "score_compacidad": round(1 - score_comp, 3),
                     "score_cantidad": round(1 - score_cant, 3),
-                    "score_total": round(0.5 * score_pri + 0.3 * (1 - score_comp) + 0.2 * (1 - score_cant), 3),
+                    "score_total": round(0.40 * score_pri + 0.35 * (1 - score_cant) + 0.25 * (1 - score_comp), 3),
                 })
 
         if len(resultados) >= n_resultados:

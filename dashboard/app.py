@@ -917,12 +917,13 @@ def main():
     creditos_faltantes = max(0, creditos_totales - creditos_acumulados)
 
     # ========== PESTAÑAS PRINCIPALES ==========
-    tab_historia_main, tab_experto_main, tab_cargas_main, tab_mapa_main, tab_pruebas_main = st.tabs([
+    tab_historia_main, tab_experto_main, tab_cargas_main, tab_mapa_main, tab_pruebas_main, tab_oferta_main = st.tabs([
         "🗂️ Historia Académica",
         "🧠 Sistema Experto",
         "📅 Generador de Cargas",
         "📋 Mapa Curricular",
         "🔬 Pruebas",
+        "📊 Oferta & Candidatas",
     ])
 
     with tab_historia_main:
@@ -2030,9 +2031,13 @@ def main():
                             for idx_carga, carga in enumerate(cargas_gen):
                                 etiqueta = carga.get("etiqueta", f"Carga {idx_carga + 1}")
                                 es_recomendada = idx_carga == 0
+                                es_max_cobertura = etiqueta == "Máxima cobertura"
 
                                 with st.container():
-                                    if es_recomendada:
+                                    if es_max_cobertura:
+                                        st.markdown(f"### 🎯 {etiqueta}")
+                                        st.caption("Agrega la mayor cantidad de materias posibles sin importar prioridad. Útil para validar el límite real de horarios sin choque.")
+                                    elif es_recomendada:
                                         st.markdown(f"### ⭐ {etiqueta}")
                                     else:
                                         st.markdown(f"### 📋 {etiqueta}")
@@ -2546,6 +2551,443 @@ def main():
             st.dataframe(df_no_mapa, use_container_width=True, hide_index=True)
         else:
             st.success("✅ Todas las materias del historial están en el mapa curricular.")
+
+    # ===================================================================
+    # PESTAÑA OFERTA & CANDIDATAS
+    # ===================================================================
+    with tab_oferta_main:
+        st.header("📊 Oferta Académica y Disponibilidad")
+        st.caption("Visualiza las materias del plan curricular con sus secciones y horarios disponibles en la oferta académica actual (IRSecciones_193).")
+
+        from services.oferta_service import cargar_oferta_csv, parsear_horario_seccion
+
+        df_oferta_tab = cargar_oferta_csv()
+
+        def horario_a_texto(horario):
+            if not horario:
+                return "Sin horario"
+            partes = []
+            for b in horario:
+                partes.append(f"{b['dia']} {b['inicio']:02d}:00–{b['fin']:02d}:00 ({b['espacio']})")
+            return " | ".join(partes)
+
+        # ── SECCIÓN 1: Todas las del mapa curricular con oferta ──────────────
+        st.subheader("📋 Materias del plan curricular con oferta disponible")
+        st.caption("Materias del mapa curricular IDeIO 2021 que tienen secciones en la oferta del periodo actual.")
+
+        if df_oferta_tab.empty:
+            st.error("No se pudo cargar la oferta académica.")
+        elif not mapa_curricular:
+            st.error("No se cargó el mapa curricular.")
+        else:
+            claves_mapa_dict = {m["clave"]: m for m in mapa_curricular}
+            df_mapa_oferta = df_oferta_tab[df_oferta_tab["Clave"].isin(claves_mapa_dict.keys())].copy()
+
+            filas_mapa = []
+            for _, row in df_mapa_oferta.iterrows():
+                clave = row["Clave"]
+                info = claves_mapa_dict.get(clave, {})
+                horario = parsear_horario_seccion(row)
+                filas_mapa.append({
+                    "Clave": clave,
+                    "Materia": info.get("nombre", str(row.get("Asignatura", ""))),
+                    "Semestre": info.get("ciclo", "—"),
+                    "Categoría": info.get("categoria", "—"),
+                    "Créditos": info.get("creditos", "—"),
+                    "Sección": int(row.get("Seccion", 0) or 0),
+                    "Profesor": str(row.get("Profesor", "")).strip(),
+                    "Cupo": int(row.get("Cupo", 0) or 0),
+                    "Inscritos": int(row.get("Inscritos", 0) or 0),
+                    "Horario": horario_a_texto(horario),
+                    "Modalidad": str(row.get("Modalidad Desc", "")).strip(),
+                })
+
+            df_mapa_show = pd.DataFrame(filas_mapa)
+            if df_mapa_show.empty:
+                st.warning("Ninguna materia del mapa curricular tiene secciones en la oferta actual.")
+            else:
+                st.success(f"Se encontraron **{len(df_mapa_show)} secciones** de **{df_mapa_show['Clave'].nunique()} materias** del plan curricular en la oferta.")
+                semestres_disp = sorted([s for s in df_mapa_show["Semestre"].dropna().unique() if s != "—"])
+                semestre_sel = st.multiselect(
+                    "Filtrar por semestre:", semestres_disp, default=semestres_disp, key="oferta_sem_filter"
+                )
+                df_mapa_filtrada = df_mapa_show[df_mapa_show["Semestre"].isin(semestre_sel)] if semestre_sel else df_mapa_show
+                st.dataframe(
+                    df_mapa_filtrada.sort_values(["Semestre", "Clave", "Sección"]),
+                    use_container_width=True, hide_index=True, height=420,
+                )
+
+        st.divider()
+
+        # ── SECCIÓN 2: Candidatas del sistema experto con oferta ─────────────
+        st.subheader("🧠 Materias que el alumno puede tomar (Sistema Experto)")
+        st.caption("Materias recomendadas por el Sistema Experto que tienen secciones disponibles en la oferta del periodo actual, con sus días y horarios.")
+
+        if "resultado_experto" not in st.session_state or not st.session_state.resultado_experto:
+            st.info("Primero ve a la pestaña **Sistema Experto** para generar las materias candidatas.")
+        elif df_oferta_tab.empty:
+            st.error("No se pudo cargar la oferta académica.")
+        else:
+            resultado_exp2 = st.session_state.resultado_experto
+            candidatas_det2 = resultado_exp2.get("candidatas_detalles", [])
+
+            if not candidatas_det2:
+                st.warning("No hay materias candidatas del Sistema Experto.")
+            else:
+                cand_lookup2 = {d["clave"].upper(): d for d in candidatas_det2}
+                df_cand_oferta = df_oferta_tab[df_oferta_tab["Clave"].isin(cand_lookup2.keys())].copy()
+
+                filas_cand = []
+                for _, row in df_cand_oferta.iterrows():
+                    clave = row["Clave"]
+                    info = cand_lookup2.get(clave, {})
+                    horario = parsear_horario_seccion(row)
+                    if not horario:
+                        continue
+                    filas_cand.append({
+                        "Prioridad": info.get("prioridad", "—"),
+                        "Nivel": info.get("nivel", "—"),
+                        "Clave": clave,
+                        "Materia": info.get("nombre", str(row.get("Asignatura", ""))),
+                        "Semestre": info.get("ciclo", "—"),
+                        "Créditos": info.get("creditos", "—"),
+                        "Sección": int(row.get("Seccion", 0) or 0),
+                        "Profesor": str(row.get("Profesor", "")).strip(),
+                        "Cupo": int(row.get("Cupo", 0) or 0),
+                        "Inscritos": int(row.get("Inscritos", 0) or 0),
+                        "Lugares disponibles": max(0, int(row.get("Cupo", 0) or 0) - int(row.get("Inscritos", 0) or 0)),
+                        "Horario": horario_a_texto(horario),
+                    })
+
+                df_cand_show = pd.DataFrame(filas_cand)
+                if df_cand_show.empty:
+                    st.warning("Ninguna materia candidata tiene secciones con horario válido en la oferta actual.")
+                else:
+                    n_mats = df_cand_show["Clave"].nunique()
+                    n_secs = len(df_cand_show)
+                    st.success(f"**{n_mats} materias** candidatas tienen secciones en la oferta. Total: **{n_secs} secciones** disponibles.")
+                    df_cand_show = df_cand_show.sort_values(["Prioridad", "Semestre", "Clave", "Sección"])
+                    st.dataframe(df_cand_show, use_container_width=True, hide_index=True, height=480)
+                    st.caption("Prioridad 1 = más urgente de cursar | Solo se muestran secciones con horario registrado en la oferta.")
+
+                    # ── Calendario semanal ──────────────────────────────────
+                    st.divider()
+                    st.subheader("🗓️ Calendario semanal de secciones candidatas")
+                    st.caption(
+                        "Cada color representa una materia distinta. "
+                        "Coloca el cursor sobre un bloque para ver nombre, sección, horario y espacio. "
+                        "Bloques en la misma columna y hora = secciones que se solapan (se muestran uno al lado del otro)."
+                    )
+
+                    import streamlit.components.v1 as _components_v1
+
+                    _dias_cal = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"]
+                    _hora_min = 7
+                    _hora_max = 21
+                    _px_h = 60          # píxeles por hora
+                    _dia_w = 150        # px de ancho por día
+                    _t_col = 52         # px columna de horas
+
+                    # Asignar un color HSL único a cada clave
+                    _claves_cal = sorted(df_cand_show["Clave"].unique())
+                    _colores_cal = {
+                        c: f"hsl({(i * 53 + 15) % 360}, 65%, 58%)"
+                        for i, c in enumerate(_claves_cal)
+                    }
+
+                    # Recopilar bloques por día con datos completos
+                    _bloques_dia = {d: [] for d in _dias_cal}
+                    for _, _row_c in df_cand_oferta.iterrows():
+                        _ck = _row_c["Clave"]
+                        if _ck not in cand_lookup2:
+                            continue
+                        _ci = cand_lookup2[_ck]
+                        _cn = _ci.get("nombre", str(_row_c.get("Asignatura", "")))
+                        _cs = int(_row_c.get("Seccion", 0) or 0)
+                        for _blq in parsear_horario_seccion(_row_c):
+                            _d = _blq["dia"]
+                            if _d not in _bloques_dia:
+                                continue
+                            _bloques_dia[_d].append({
+                                "inicio": _blq["inicio"],
+                                "fin":    _blq["fin"],
+                                "clave":  _ck,
+                                "nombre": _cn,
+                                "seccion": _cs,
+                                "espacio": _blq["espacio"],
+                                "color":  _colores_cal.get(_ck, "#6c8ebf"),
+                            })
+
+                    # Algoritmo de asignación de sub-columnas para solapamientos
+                    def _asignar_cols(bloques):
+                        if not bloques:
+                            return []
+                        sb = sorted(bloques, key=lambda b: (b["inicio"], b["fin"]))
+                        col_ends = []
+                        assigned = []
+                        for b in sb:
+                            placed = False
+                            for ci, ce in enumerate(col_ends):
+                                if b["inicio"] >= ce:
+                                    col_ends[ci] = b["fin"]
+                                    assigned.append({**b, "col_idx": ci})
+                                    placed = True
+                                    break
+                            if not placed:
+                                assigned.append({**b, "col_idx": len(col_ends)})
+                                col_ends.append(b["fin"])
+                        # Calcular concurrentes reales para cada bloque
+                        result = []
+                        for i, ab in enumerate(assigned):
+                            conc = sum(
+                                1 for j, ob in enumerate(assigned)
+                                if i != j
+                                and ab["inicio"] < ob["fin"]
+                                and ob["inicio"] < ab["fin"]
+                            ) + 1
+                            result.append({**ab, "n_conc": conc})
+                        return result
+
+                    # Leyenda de colores
+                    _leg = (
+                        "<div style='display:flex;flex-wrap:wrap;gap:6px;"
+                        "margin-bottom:10px;font-family:sans-serif;'>"
+                    )
+                    for _cv, _col in _colores_cal.items():
+                        _nm_leg = cand_lookup2.get(_cv, {}).get("nombre", _cv)
+                        _nm_leg = (_nm_leg[:24] + "…") if len(_nm_leg) > 24 else _nm_leg
+                        _leg += (
+                            f"<span title='{_nm_leg}' style='background:{_col};color:#fff;"
+                            f"padding:3px 10px;border-radius:12px;font-size:11px;"
+                            f"text-shadow:0 1px 2px rgba(0,0,0,.45);cursor:default;'>"
+                            f"{_cv}</span>"
+                        )
+                    _leg += "</div>"
+
+                    # CSS del calendario
+                    _total_rows = _hora_max - _hora_min
+                    _cal_h = _total_rows * _px_h
+                    _css = f"""<style>
+.wc{{font-family:sans-serif;overflow-x:auto;min-width:600px;}}
+.wc-hdr{{display:flex;background:#f0f2f6;border:1px solid #ccc;border-radius:8px 8px 0 0;border-bottom:none;}}
+.wc-hdr-t{{width:{_t_col}px;flex-shrink:0;padding:7px 4px;font-size:11px;color:#999;text-align:right;}}
+.wc-hdr-d{{width:{_dia_w}px;flex-shrink:0;padding:7px;font-weight:600;font-size:12px;text-align:center;border-left:1px solid #ccc;}}
+.wc-grid{{display:flex;border:1px solid #ccc;border-radius:0 0 8px 8px;overflow:hidden;}}
+.wc-tcol{{width:{_t_col}px;flex-shrink:0;position:relative;height:{_cal_h}px;background:#fafafa;border-right:1px solid #ccc;}}
+.wc-tlab{{position:absolute;right:5px;font-size:10px;color:#aaa;transform:translateY(-6px);user-select:none;}}
+.wc-dcol{{width:{_dia_w}px;flex-shrink:0;position:relative;height:{_cal_h}px;border-left:1px solid #eee;background:#fff;}}
+.wc-hline{{position:absolute;left:0;right:0;border-top:1px solid #f0f0f0;pointer-events:none;}}
+.wc-blk{{position:absolute;border-radius:4px;overflow:hidden;font-size:10.5px;color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,.55);padding:3px 5px;box-sizing:border-box;
+  border:1px solid rgba(255,255,255,.2);cursor:default;line-height:1.35;}}
+.wc-blk:hover{{filter:brightness(1.2);z-index:9999!important;
+  outline:2px solid rgba(255,255,255,.8);box-shadow:0 2px 8px rgba(0,0,0,.3);}}
+</style>"""
+
+                    # Construir HTML
+                    _html = [_css, "<div class='wc'>", _leg,
+                             "<div class='wc-hdr'>",
+                             f"<div class='wc-hdr-t'>Hora</div>"]
+                    for _d in _dias_cal:
+                        _html.append(f"<div class='wc-hdr-d'>{_d}</div>")
+                    _html.append("</div><div class='wc-grid'>")
+
+                    # Columna de horas
+                    _html.append(f"<div class='wc-tcol'>")
+                    for _h in range(_hora_min, _hora_max + 1):
+                        _tp = (_h - _hora_min) * _px_h
+                        _html.append(f"<div class='wc-tlab' style='top:{_tp}px;'>{_h:02d}:00</div>")
+                    _html.append("</div>")
+
+                    # Columnas por día
+                    for _d in _dias_cal:
+                        _bqs = _asignar_cols(_bloques_dia.get(_d, []))
+                        _html.append("<div class='wc-dcol'>")
+                        # Líneas de hora
+                        for _hi in range(_total_rows + 1):
+                            _html.append(f"<div class='wc-hline' style='top:{_hi*_px_h}px;'></div>")
+                        # Bloques de materias
+                        for _b in _bqs:
+                            _top_b  = (_b["inicio"] - _hora_min) * _px_h + 1
+                            _ht_b   = (_b["fin"] - _b["inicio"]) * _px_h - 3
+                            _w_pct  = 100.0 / _b["n_conc"]
+                            _lft_pct = _b["col_idx"] * _w_pct
+                            _tip = (
+                                f"{_b['nombre']} | {_b['clave']} "
+                                f"Sec.{_b['seccion']} | "
+                                f"{_b['inicio']:02d}:00\u2013{_b['fin']:02d}:00 | "
+                                f"{_b['espacio']}"
+                            ).replace("'", "&#39;").replace('"', "&quot;")
+                            _label = _b["clave"]
+                            _html.append(
+                                f"<div class='wc-blk' "
+                                f"style='top:{_top_b}px;height:{_ht_b}px;"
+                                f"left:{_lft_pct:.2f}%;width:{_w_pct:.2f}%;"
+                                f"background:{_b['color']};z-index:{_b['col_idx']+1};'"
+                                f" title='{_tip}'>"
+                                f"<strong>{_label}</strong>"
+                                f"</div>"
+                            )
+                        _html.append("</div>")
+
+                    _html.append("</div></div>")  # wc-grid + wc
+                    _components_v1.html("".join(_html), height=_cal_h + 170, scrolling=True)
+
+                    # ── SECCIÓN 3: Lista de materias por día ────────────────
+                    st.divider()
+                    st.subheader("📋 Materias disponibles por día")
+                    st.caption("Secciones con horario válido, agrupadas por día de la semana.")
+
+                    _dias_lista = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"]
+                    _cols_dias = st.columns(3)
+                    _dia_labels = {
+                        "Lunes": "🟦 Lunes", "Martes": "🟩 Martes",
+                        "Miercoles": "🟨 Miércoles", "Jueves": "🟧 Jueves",
+                        "Viernes": "🟥 Viernes", "Sabado": "🟪 Sábado",
+                    }
+                    for _di, _dia_n in enumerate(_dias_lista):
+                        _bloqs_dia = _bloques_dia.get(_dia_n, [])
+                        with _cols_dias[_di % 3]:
+                            st.markdown(f"**{_dia_labels[_dia_n]}**")
+                            if not _bloqs_dia:
+                                st.caption("Sin secciones")
+                            else:
+                                _bloqs_sorted = sorted(_bloqs_dia, key=lambda b: (b["inicio"], b["nombre"]))
+                                for _bb in _bloqs_sorted:
+                                    st.markdown(
+                                        f"- `{_bb['clave']}` Sec.{_bb['seccion']} &nbsp;"
+                                        f"**{_bb['inicio']:02d}:00–{_bb['fin']:02d}:00**  \n"
+                                        f"  _{_bb['nombre']}_  · {_bb['espacio']}"
+                                    )
+
+                    # ── SECCIÓN 4: Análisis de compatibilidad ───────────────
+                    st.divider()
+                    st.subheader("🔍 Análisis de compatibilidad entre materias candidatas")
+                    st.caption(
+                        "Detecta cuántas materias pueden coexistir en un horario sin choques. "
+                        "Útil para entender por qué el optimizador no llega a 7 materias."
+                    )
+
+                    # Agrupar bloques por clave: unión de todas sus secciones
+                    _horarios_por_clave = {}
+                    for _, _rr in df_cand_oferta.iterrows():
+                        _ck2 = _rr["Clave"]
+                        if _ck2 not in cand_lookup2:
+                            continue
+                        for _blq2 in parsear_horario_seccion(_rr):
+                            _horarios_por_clave.setdefault(_ck2, []).append({
+                                "seccion": int(_rr.get("Seccion", 0) or 0),
+                                **_blq2,
+                            })
+
+                    _claves_ana = sorted(_horarios_por_clave.keys())
+
+                    # Matriz de conflicto: True si TODAS las combinaciones de secciones
+                    # de dos materias chocan (nunca se pueden tomar juntas)
+                    def _hay_choque_bloques(ba, bb):
+                        return ba["dia"] == bb["dia"] and ba["inicio"] < bb["fin"] and bb["inicio"] < ba["fin"]
+
+                    def _secciones_de(clave):
+                        """Agrupa bloques por seccion para una clave."""
+                        secs = {}
+                        for bl in _horarios_por_clave.get(clave, []):
+                            secs.setdefault(bl["seccion"], []).append(bl)
+                        return list(secs.values())
+
+                    def _siempre_chocan(cA, cB):
+                        """True si no existe ningún par de secciones de cA y cB compatibles."""
+                        for sa in _secciones_de(cA):
+                            for sb in _secciones_de(cB):
+                                choca = any(
+                                    _hay_choque_bloques(ba, bb)
+                                    for ba in sa for bb in sb
+                                )
+                                if not choca:
+                                    return False
+                        return True
+
+                    def _a_veces_chocan(cA, cB):
+                        """True si al menos algún par de secciones choca."""
+                        for sa in _secciones_de(cA):
+                            for sb in _secciones_de(cB):
+                                if any(_hay_choque_bloques(ba, bb) for ba in sa for bb in sb):
+                                    return True
+                        return False
+
+                    # Contar conflictos por materia
+                    _fila_conf = []
+                    _siempre_con = {c: 0 for c in _claves_ana}
+                    _aveces_con = {c: 0 for c in _claves_ana}
+                    for _i2, _cA in enumerate(_claves_ana):
+                        for _cB in _claves_ana[_i2+1:]:
+                            if _siempre_chocan(_cA, _cB):
+                                _siempre_con[_cA] += 1
+                                _siempre_con[_cB] += 1
+                            elif _a_veces_chocan(_cA, _cB):
+                                _aveces_con[_cA] += 1
+                                _aveces_con[_cB] += 1
+
+                    for _ck3 in _claves_ana:
+                        _nm3 = cand_lookup2.get(_ck3, {}).get("nombre", _ck3)
+                        _pr3 = cand_lookup2.get(_ck3, {}).get("prioridad", "-")
+                        _ns3 = len(_secciones_de(_ck3))
+                        _fila_conf.append({
+                            "Clave": _ck3,
+                            "Materia": _nm3,
+                            "Prioridad": _pr3,
+                            "Secciones": _ns3,
+                            "⛔ Siempre choca con": _siempre_con[_ck3],
+                            "⚠️ A veces choca con": _aveces_con[_ck3],
+                            "✅ Compatibles con": len(_claves_ana) - 1 - _siempre_con[_ck3] - _aveces_con[_ck3],
+                        })
+
+                    df_conf = pd.DataFrame(_fila_conf).sort_values(["Prioridad", "⛔ Siempre choca con"], ascending=[True, False])
+
+                    # Colorear según conflictos permanentes
+                    def _color_conf(row):
+                        if row["⛔ Siempre choca con"] >= len(_claves_ana) // 2:
+                            return ["background-color:#f8d7da"] * len(row)
+                        if row["⛔ Siempre choca con"] > 0:
+                            return ["background-color:#fff3cd"] * len(row)
+                        return ["background-color:#d4edda"] * len(row)
+
+                    st.dataframe(
+                        df_conf.style.apply(_color_conf, axis=1),
+                        use_container_width=True, hide_index=True,
+                    )
+                    st.caption(
+                        "🟢 Verde = sin conflictos permanentes (siempre hay al menos una sección compatible) · "
+                        "🟡 Amarillo = conflicto con alguna materia en todas sus secciones · "
+                        "🔴 Rojo = muchos conflictos permanentes, reduce drásticamente las combinaciones posibles"
+                    )
+
+                    # Cota superior: máximo de materias sin ningún conflicto permanente
+                    _libres = [c for c in _claves_ana if _siempre_con[c] == 0]
+                    _con_conflicto = [c for c in _claves_ana if _siempre_con[c] > 0]
+
+                    with st.expander("📐 ¿Por qué el optimizador no llega a 7 materias?", expanded=True):
+                        _c1, _c2, _c3 = st.columns(3)
+                        _c1.metric("Materias candidatas totales", len(_claves_ana))
+                        _c2.metric("Sin conflicto permanente", len(_libres))
+                        _c3.metric("Con conflicto permanente", len(_con_conflicto))
+
+                        st.markdown(
+                            f"De las **{len(_claves_ana)}** materias candidatas con secciones en la oferta:\n\n"
+                            f"- **{len(_libres)}** tienen al menos una sección compatible con el resto "
+                            f"(son candidatas reales al horario).\n"
+                            f"- **{len(_con_conflicto)}** chocan permanentemente con alguna otra materia "
+                            f"(sin importar qué sección elijas, siempre habrá conflicto con al menos otra materia).\n\n"
+                            f"Esto no impide tomarlas individualmente, pero **reduce el espacio de horarios válidos** "
+                            f"exponencialmente. Además, para que quepan **7 materias** simultáneamente sin choque, "
+                            f"se necesita que las 7 secciones elegidas no se crucen en ninguna hora/día — "
+                            f"una condición muy restrictiva dado el horario concentrado de la oferta 193."
+                        )
+
+                        if _con_conflicto:
+                            st.markdown("**Materias con conflicto permanente:**")
+                            for _cc in sorted(_con_conflicto):
+                                _nm_cc = cand_lookup2.get(_cc, {}).get("nombre", _cc)
+                                st.markdown(f"- `{_cc}` — {_nm_cc} (choca permanentemente con {_siempre_con[_cc]} materia(s))")
 
 
 if __name__ == "__main__":
