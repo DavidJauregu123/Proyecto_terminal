@@ -1930,8 +1930,8 @@ def main():
                             max_mat = 3
                             materias_deseadas = st.slider("Materias deseadas", 1, 3, 3, key="cargas_mat_deseadas")
                         else:
-                            max_mat = 8
-                            materias_deseadas = st.slider("Materias deseadas", 1, 8, 5, key="cargas_mat_deseadas")
+                            max_mat = 9
+                            materias_deseadas = st.slider("Materias deseadas", 1, 9, 5, key="cargas_mat_deseadas")
 
                         # --- Tabla de disponibilidad horaria (clickable) ---
                         st.subheader("🕐 Disponibilidad Horaria")
@@ -2042,6 +2042,79 @@ def main():
                                     else:
                                         st.markdown(f"### 📋 {etiqueta}")
 
+                                    # Explicación de diferencias vs Recomendada
+                                    if idx_carga > 0:
+                                        ref = cargas_gen[0]
+                                        ref_claves = {s["clave"]: s for s in ref["secciones"]}
+                                        cur_claves = {s["clave"]: s for s in carga["secciones"]}
+
+                                        materias_nuevas = set(cur_claves) - set(ref_claves)
+                                        materias_quitadas = set(ref_claves) - set(cur_claves)
+                                        materias_comunes = set(cur_claves) & set(ref_claves)
+
+                                        cambios_seccion = []
+                                        for cl in materias_comunes:
+                                            sec_ref = ref_claves[cl]
+                                            sec_cur = cur_claves[cl]
+                                            if sec_ref.get("seccion") != sec_cur.get("seccion"):
+                                                h_ref = ", ".join(f"{b['dia'][:3]} {b['inicio']:02d}-{b['fin']:02d}" for b in sec_ref["horario"])
+                                                h_cur = ", ".join(f"{b['dia'][:3]} {b['inicio']:02d}-{b['fin']:02d}" for b in sec_cur["horario"])
+                                                cambios_seccion.append(f"- **{sec_cur['nombre']}**: horario cambia de ({h_ref}) a ({h_cur})")
+
+                                        # Construir explicación detallada
+                                        diff_lines = []
+                                        razones = []
+
+                                        if materias_quitadas:
+                                            for c in materias_quitadas:
+                                                s = ref_claves[c]
+                                                diff_lines.append(f"- **Se quita {s['nombre']}** (nivel {s['prioridad']})")
+                                                # Explicar por qué
+                                                h_str = ", ".join(f"{b['dia'][:3]} {b['inicio']:02d}-{b['fin']:02d}" for b in s["horario"])
+                                                razones.append(f"Quitar *{s['nombre']}* ({h_str}) libera espacio en el horario")
+
+                                        if materias_nuevas:
+                                            for c in materias_nuevas:
+                                                s = cur_claves[c]
+                                                diff_lines.append(f"- **Se agrega {s['nombre']}** (nivel {s['prioridad']})")
+
+                                        if cambios_seccion:
+                                            diff_lines.extend(cambios_seccion)
+                                            razones.append("Cambiar de sección ofrece un horario diferente con otro profesor")
+
+                                        # Comparar scores para explicar el trade-off
+                                        ref_pri = ref.get("score_prioridad", 0)
+                                        ref_comp = ref.get("score_compacidad", 0)
+                                        cur_pri = carga.get("score_prioridad", 0)
+                                        cur_comp = carga.get("score_compacidad", 0)
+
+                                        if carga["total_materias"] < ref["total_materias"]:
+                                            diff_mat = ref["total_materias"] - carga["total_materias"]
+                                            razones.append(f"Carga más ligera ({carga['total_materias']} vs {ref['total_materias']} materias), reduce la presión académica del semestre")
+                                        elif carga["total_materias"] > ref["total_materias"]:
+                                            razones.append(f"Carga más completa ({carga['total_materias']} vs {ref['total_materias']} materias), avanza más rápido en la carrera")
+
+                                        if cur_comp > ref_comp:
+                                            razones.append(f"Horario más compacto ({cur_comp:.0%} vs {ref_comp:.0%}): menos huecos entre clases y días más concentrados")
+                                        elif cur_comp < ref_comp:
+                                            razones.append(f"Horario más disperso ({cur_comp:.0%} vs {ref_comp:.0%})")
+
+                                        if cur_pri < ref_pri:
+                                            razones.append(f"Sacrifica cobertura de prioridad ({cur_pri:.0%} vs {ref_pri:.0%}) a cambio de las ventajas anteriores")
+
+                                        # Si aún no hay razones, dar una genérica
+                                        if not razones:
+                                            razones.append("Ofrece una combinación distinta de secciones con horarios alternativos")
+
+                                        if not diff_lines:
+                                            diff_lines.append("- Mismas materias, mismo horario")
+
+                                        explicacion = "**Cambios vs Recomendada:**\n" + "\n".join(diff_lines)
+                                        if razones:
+                                            explicacion += "\n\n**¿Por qué esta alternativa?** " + ". ".join(razones) + "."
+
+                                        st.info(explicacion)
+
                                     # Métricas
                                     mc1, mc2, mc3, mc4 = st.columns(4)
                                     mc1.metric("Materias", carga["total_materias"])
@@ -2077,13 +2150,13 @@ def main():
                                             for bloque in sec["horario"]:
                                                 for h in range(bloque["inicio"], bloque["fin"]):
                                                     key = (h, bloque["dia"])
-                                                    grid[key] = f"{sec['clave']}"
+                                                    grid[key] = sec.get("nombre", sec["clave"])
 
                                         _dias_h = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"]
                                         header_h = "".join(f'<th style="padding:4px 8px;text-align:center;font-size:12px;">{d[:3]}</th>' for d in _dias_h)
                                         filas_h = []
                                         _colores_mat = {}
-                                        _paleta = ["#dbeafe", "#fef3c7", "#d1fae5", "#fce7f3", "#e0e7ff", "#fde68a", "#ccfbf1", "#fbcfe8", "#c7d2fe"]
+                                        _paleta = ["#93c5fd", "#fbbf24", "#6ee7b7", "#f472b6", "#a78bfa", "#fb923c", "#22d3ee", "#e879f9", "#4ade80", "#f87171"]
                                         for h in range(7, 22):
                                             celdas_h = ""
                                             for dia in _dias_h:
