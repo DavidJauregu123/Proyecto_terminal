@@ -1907,8 +1907,9 @@ def main():
             else:
                 # --- Selector de oferta académica ---
                 opciones_oferta = {
-                    "Prueba Oferta Primavera (194)": str(_carpeta_oferta / "IRSecciones_194.csv"),
-                    "Prueba Oferta Otoño (195)": str(_carpeta_oferta / "IRSecciones_195.csv"),
+                    "Prueba Oferta Primavera (193)": str(_carpeta_oferta / "IRSecciones_193.csv"),
+                    "Prueba Oferta Verano (194)": str(_carpeta_oferta / "IR_194_Limpio.csv"),
+                    "Prueba Oferta Otoño (195)": str(_carpeta_oferta / "IR_195_Limpio.csv"),
                 }
                 oferta_seleccionada = st.selectbox(
                     "📂 Selecciona la oferta académica",
@@ -2650,8 +2651,9 @@ def main():
         _carpeta_oferta2 = Path(__file__).resolve().parent.parent / "agents" / "OfertaAcademica"
 
         opciones_oferta_tab = {
-            "Prueba Oferta Primavera (194)": str(_carpeta_oferta2 / "IRSecciones_194.csv"),
-            "Prueba Oferta Otoño (195)": str(_carpeta_oferta2 / "IRSecciones_195.csv"),
+            "Prueba Oferta Primavera (193)": str(_carpeta_oferta2 / "IRSecciones_193.csv"),
+            "Prueba Oferta Verano (194)": str(_carpeta_oferta2 / "IR_194_Limpio.csv"),
+            "Prueba Oferta Otoño (195)": str(_carpeta_oferta2 / "IR_195_Limpio.csv"),
         }
         oferta_sel_tab = st.selectbox(
             "📂 Selecciona la oferta académica",
