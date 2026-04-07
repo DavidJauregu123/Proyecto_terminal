@@ -1892,6 +1892,8 @@ def main():
 
         from services.oferta_service import cargar_oferta_csv, filtrar_oferta_por_candidatas
         from agents.generador_cargas import generar_cargas_nsga3
+        import services.oferta_service as _oferta_mod
+        _carpeta_oferta = Path(_oferta_mod.__file__).parent.parent / "agents" / "OfertaAcademica"
 
         # Verificar que existan candidatas del sistema experto
         if "resultado_experto" not in st.session_state or not st.session_state.resultado_experto:
@@ -1903,8 +1905,20 @@ def main():
             if not candidatas_det:
                 st.warning("No hay materias candidatas. Revisa el Sistema Experto.")
             else:
+                # --- Selector de oferta académica ---
+                opciones_oferta = {
+                    "Prueba Oferta Primavera (194)": str(_carpeta_oferta / "IRSecciones_194.csv"),
+                    "Prueba Oferta Otoño (195)": str(_carpeta_oferta / "IRSecciones_195.csv"),
+                }
+                oferta_seleccionada = st.selectbox(
+                    "📂 Selecciona la oferta académica",
+                    list(opciones_oferta.keys()),
+                    key="selector_oferta_cargas",
+                )
+                ruta_oferta = opciones_oferta[oferta_seleccionada]
+
                 # --- Cargar oferta académica ---
-                df_oferta = cargar_oferta_csv()
+                df_oferta = cargar_oferta_csv(ruta_csv=ruta_oferta)
                 if df_oferta.empty:
                     st.error("No se encontró el archivo de oferta académica (CSV) en `agents/OfertaAcademica/`.")
                 else:
@@ -2630,11 +2644,21 @@ def main():
     # ===================================================================
     with tab_oferta_main:
         st.header("📊 Oferta Académica y Disponibilidad")
-        st.caption("Visualiza las materias del plan curricular con sus secciones y horarios disponibles en la oferta académica actual (IRSecciones_193).")
+        st.caption("Visualiza las materias del plan curricular con sus secciones y horarios disponibles en la oferta académica seleccionada.")
 
         from services.oferta_service import cargar_oferta_csv, parsear_horario_seccion
+        _carpeta_oferta2 = Path(__file__).resolve().parent.parent / "agents" / "OfertaAcademica"
 
-        df_oferta_tab = cargar_oferta_csv()
+        opciones_oferta_tab = {
+            "Prueba Oferta Primavera (194)": str(_carpeta_oferta2 / "IRSecciones_194.csv"),
+            "Prueba Oferta Otoño (195)": str(_carpeta_oferta2 / "IRSecciones_195.csv"),
+        }
+        oferta_sel_tab = st.selectbox(
+            "📂 Selecciona la oferta académica",
+            list(opciones_oferta_tab.keys()),
+            key="selector_oferta_tab",
+        )
+        df_oferta_tab = cargar_oferta_csv(ruta_csv=opciones_oferta_tab[oferta_sel_tab])
 
         def horario_a_texto(horario):
             if not horario:

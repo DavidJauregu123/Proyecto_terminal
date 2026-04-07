@@ -84,6 +84,9 @@ def parsear_horario_seccion(row: pd.Series) -> List[Dict]:
     return bloques
 
 
+CARPETA_OFERTA = Path(__file__).parent.parent / "agents" / "OfertaAcademica"
+
+
 def cargar_oferta_csv(ruta_csv: Optional[str] = None) -> pd.DataFrame:
     """
     Carga el CSV de oferta académica.
@@ -108,6 +111,23 @@ def cargar_oferta_csv(ruta_csv: Optional[str] = None) -> pd.DataFrame:
 
     try:
         df = pd.read_csv(ruta_csv, encoding="latin-1")
+
+        # Si la primera columna no es "Periodo", probablemente hay una fila de título extra
+        if df.columns[0] != "Periodo" and "Clave" not in df.columns:
+            df = pd.read_csv(ruta_csv, encoding="latin-1", skiprows=1)
+
+        # Normalizar nombres de columnas al formato esperado (estilo 193)
+        col_rename = {
+            "Espacio Lunes": "Lunes_Espacio", "Lun I": "Lunes_I", "Lun F": "Lunes_F",
+            "Espacio Martes": "Martes_Espacio", "Mar I": "Martes_I", "Mar F": "Martes_F",
+            "Espacio Miercoles": "Miercoles_Espacio", "Mie I": "Miercoles_I", "Mie F": "Miercoles_F",
+            "Mar F.1": "Miercoles_F",  # Error en CSVs 194/195: columna miércoles fin dice "Mar F"
+            "Espacio Jueves": "Jueves_Espacio", "Jue I": "Jueves_I", "Jue F": "Jueves_F",
+            "Espacio Viernes": "Viernes_Espacio", "Vie I": "Viernes_I", "Vie F": "Viernes_F",
+            "Espacio Sabado": "Sabado_Espacio", "Sab I": "Sabado_I", "Sab F": "Sabado_F",
+        }
+        df.rename(columns=col_rename, inplace=True)
+
         df["Clave"] = df["Clave"].astype(str).str.strip().str.upper()
         return df
     except Exception as e:
