@@ -74,8 +74,8 @@ def objetivo_compacidad(secciones_carga: List[Dict]) -> float:
         horas_unicas = sorted(set(horas))
         if len(horas_unicas) < 2:
             continue
-        rango = horas_unicas[-1] - horas_unicas[0]
-        huecos = rango - len(horas_unicas)
+        # huecos = horas vacías dentro del rango (0 si son todas consecutivas)
+        huecos = (horas_unicas[-1] - horas_unicas[0] + 1) - len(horas_unicas)
         total_huecos += huecos
         total_horas += len(horas_unicas)
 
@@ -449,56 +449,7 @@ def generar_cargas_nsga3(
             break
         resultados.append(ev)
 
-    # --- Agregar recomendación de máxima cobertura (ignora prioridad) ---
-    # Greedy: agrega materias en orden de mayor secciones disponibles -> más fácil de encajar
-    _carga_max = []
-    _claves_max = set()
-    _cred_max = 0
-    # Orden: simplemente todas las materias disponibles, sin prioridad
-    for _clave_m in sorted(secciones_por_materia.keys()):
-        if len(_claves_max) >= max_materias:
-            break
-        if _clave_m in _claves_max:
-            continue
-        opciones_m = sorted(
-            secciones_por_materia[_clave_m],
-            key=lambda s: -len(s["horario"])  # preferir sección con más bloques (más info)
-        )
-        for _sec_m in opciones_m:
-            if _cred_max + _sec_m["creditos"] > max_creditos:
-                continue
-            if disponibilidad and not verificar_disponibilidad(_sec_m["horario"], disponibilidad):
-                continue
-            if any(verificar_choque_horario(_sec_m["horario"], e["horario"]) for e in _carga_max):
-                continue
-            _carga_max.append(_sec_m)
-            _claves_max.add(_clave_m)
-            _cred_max += _sec_m["creditos"]
-            break
-
-    if _carga_max and es_carga_valida(_carga_max, disponibilidad, max_materias, max_creditos, min_creditos):
-        _sp = objetivo_prioridad(_carga_max, max_materias)
-        _sc = objetivo_compacidad(_carga_max)
-        _sq = objetivo_cantidad(_carga_max, materias_deseadas)
-        _clave_max_key = tuple(sorted(s["clave"] for s in _carga_max))
-        # Solo agregar si no está ya entre los resultados (carga diferente)
-        _ya_incluida = any(
-            tuple(sorted(s["clave"] for s in r["secciones"])) == _clave_max_key
-            for r in resultados
-        )
-        if not _ya_incluida:
-            resultados.append({
-                "secciones": sorted(_carga_max, key=lambda s: (s["prioridad"], s["ciclo"])),
-                "total_materias": len(set(s["clave"] for s in _carga_max)),
-                "total_creditos": sum(s["creditos"] for s in _carga_max),
-                "score_prioridad": round(_sp, 3),
-                "score_compacidad": round(1 - _sc, 3),
-                "score_cantidad": round(1 - _sq, 3),
-                "score_total": round(0.40 * _sp + 0.35 * (1 - _sq) + 0.25 * (1 - _sc), 3),
-                "etiqueta": "Máxima cobertura",
-            })
-
-    # Etiquetar las demás
+    # Etiquetar los resultados
     etiquetas = ["Recomendada", "Alternativa 1", "Alternativa 2",
                  "Alternativa 3", "Alternativa 4"]
     for i, r in enumerate(resultados):

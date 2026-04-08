@@ -719,13 +719,27 @@ def main():
     st.title("📊 Reporte de Estado Académico")
     st.markdown("---")
 
+    # CSS para compactar el sidebar
+    st.markdown("""
+        <style>
+        section[data-testid="stSidebar"] .block-container { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+        section[data-testid="stSidebar"] h1 { font-size: 1.1rem; margin-bottom: 0.2rem; }
+        section[data-testid="stSidebar"] h2 { font-size: 0.95rem; margin-top: 0.4rem; margin-bottom: 0.1rem; }
+        section[data-testid="stSidebar"] h3 { font-size: 0.85rem; margin-top: 0.3rem; margin-bottom: 0.1rem; }
+        section[data-testid="stSidebar"] p { margin-bottom: 0.2rem; }
+        section[data-testid="stSidebar"] hr { margin: 0.3rem 0; }
+        section[data-testid="stSidebar"] .stFileUploader { margin-bottom: 0.2rem; }
+        section[data-testid="stSidebar"] .stRadio { margin-bottom: 0.1rem; }
+        </style>
+    """, unsafe_allow_html=True)
+
     # Sidebar
     with st.sidebar:
         st.header("⚙️ Configuración")
 
         # ── PASO 1: Subir Historial Académico (PRIMERO) ──
         st.subheader("📄 Paso 1: Historial Académico")
-        st.caption("Sube primero el historial académico. Es la fuente de verdad para materias aprobadas.")
+        st.caption("Fuente principal de materias aprobadas.")
         historial_file = st.file_uploader(
             "Cargar Historial Académico (PDF)",
             type="pdf",
@@ -799,7 +813,7 @@ def main():
 
         # ── PASO 2: Subir Kardex (DESPUÉS) ──
         st.subheader("📄 Paso 2: Kardex")
-        st.caption("El kardex agrega detalle de periodos, intentos y materias en curso.")
+        st.caption("Agrega periodos, intentos y materias en curso.")
 
         pdf_file = st.file_uploader(
             "Cargar Kardex (PDF)",
@@ -874,6 +888,25 @@ def main():
                 import traceback
                 st.error(f"❌ Error al procesar PDF: {str(e)}")
                 st.code(traceback.format_exc())
+
+        st.markdown("---")
+
+        # ── PREFERENCIA DE ESPECIALIDAD ──
+        st.subheader("🎯 Especialidad")
+        st.caption("Línea de preespecialidad. Si aún no se define, el sistema la infiere.")
+        _esp_opciones = {
+            "Sin preferencia (el sistema infiere)": None,
+            "TICS — Tecnologías de Información y Comunicación": "TICS",
+            "Business Intelligence — Inteligencia de Negocios": "BUSINESS_INTELLIGENCE",
+        }
+        _esp_sel = st.radio(
+            "Especialidad del estudiante",
+            list(_esp_opciones.keys()),
+            index=0,
+            label_visibility="collapsed",
+            key="radio_especialidad",
+        )
+        st.session_state.especialidad_forzada = _esp_opciones[_esp_sel]
 
     # Verificar si hay datos
     if "datos_estudiante" not in st.session_state:
@@ -996,10 +1029,26 @@ def main():
                         pass
 
                 # ── Ejecutar sistema experto ──
+                # Se ignoran materias EN_CURSO/RECURSANDO para que el sistema
+                # recomiende como si el alumno aún no hubiera cargado este semestre,
+                # permitiendo comparar la recomendación vs la carga real.
+                historial_para_experto = [
+                    h for h in historial_aprobado
+                    if h["estatus"] not in ("EN_CURSO", "RECURSANDO")
+                ]
+                # Las materias en curso se pasan por separado para que Regla D
+                # pueda detectar orientación sin excluirlas de candidatas.
+                en_curso_historial = [
+                    h for h in historial_aprobado
+                    if h["estatus"] in ("EN_CURSO", "RECURSANDO")
+                ]
+                especialidad_forzada = st.session_state.get("especialidad_forzada", None)
                 resultado = ejecutar_sistema_experto(
-                    historial_academico=historial_aprobado,
+                    historial_academico=historial_para_experto,
                     mapa_curricular=mapa_curricular,
-                    plan_estudios=plan_estudios
+                    plan_estudios=plan_estudios,
+                    especialidad_forzada=especialidad_forzada,
+                    en_curso_para_especialidad=en_curso_historial,
                 )
 
                 # Guardar para pestaña de generador de cargas
@@ -1972,9 +2021,9 @@ def main():
                         # Botones rápidos
                         col_quick1, col_quick2, col_quick3, col_quick4 = st.columns(4)
                         with col_quick1:
-                            if st.button("☀️ Matutino (7-14)", key="quick_mat"):
+                            if st.button("☀️ Matutino (7-15)", key="quick_mat"):
                                 for dia in dias_semana:
-                                    st.session_state.disp_df[dia] = [7 <= h < 14 and dia != "Sabado" for h in horas_rango]
+                                    st.session_state.disp_df[dia] = [7 <= h < 15 and dia != "Sabado" for h in horas_rango]
                                 st.rerun()
                         with col_quick2:
                             if st.button("🌙 Vespertino (14-22)", key="quick_vesp"):
@@ -2046,13 +2095,9 @@ def main():
                             for idx_carga, carga in enumerate(cargas_gen):
                                 etiqueta = carga.get("etiqueta", f"Carga {idx_carga + 1}")
                                 es_recomendada = idx_carga == 0
-                                es_max_cobertura = etiqueta == "Máxima cobertura"
 
                                 with st.container():
-                                    if es_max_cobertura:
-                                        st.markdown(f"### 🎯 {etiqueta}")
-                                        st.caption("Agrega la mayor cantidad de materias posibles sin importar prioridad. Útil para validar el límite real de horarios sin choque.")
-                                    elif es_recomendada:
+                                    if es_recomendada:
                                         st.markdown(f"### ⭐ {etiqueta}")
                                     else:
                                         st.markdown(f"### 📋 {etiqueta}")
@@ -2194,6 +2239,160 @@ def main():
                                         st.markdown(tabla_horario, unsafe_allow_html=True)
 
                                     st.divider()
+
+                        # ==============================================================
+                        # SECCIÓN: COMPARACIÓN CON LA CARGA REAL DEL ESTUDIANTE
+                        # ==============================================================
+                        st.divider()
+                        st.subheader("🔍 Comparación con la carga real del estudiante")
+                        st.caption("Contrasta la carga real del estudiante con la recomendación del sistema.")
+
+                        if "cargas_generadas" not in st.session_state or not st.session_state.cargas_generadas:
+                            st.info("Genera las cargas académicas primero para ver la comparación con la carga real del estudiante.")
+                        else:
+                            cargas_gen_comp = st.session_state.cargas_generadas
+
+                        # Extraer materias en curso del historial
+                            _en_curso_reales = []
+                            if not historial_filtrado.empty:
+                                _mask_ec = historial_filtrado["estatus"].isin(["EN_CURSO", "RECURSANDO"])
+                                for _, _r in historial_filtrado[_mask_ec].iterrows():
+                                    _en_curso_reales.append({
+                                        "clave": str(_r.get("clave", "")).strip().upper(),
+                                        "nombre": str(_r.get("nombre", "")).strip(),
+                                        "creditos": int(_r.get("creditos", 0)) if pd.notna(_r.get("creditos")) else 0,
+                                        "estatus": str(_r.get("estatus", "")).strip(),
+                                    })
+
+                            if not _en_curso_reales:
+                                st.info("No se detectaron materias en curso en el historial. El análisis de comparación requiere que el alumno tenga materias activas este semestre.")
+                            else:
+                                # --- Preparar datos base ---
+                                _candidatas_dict = {
+                                    d["clave"]: d for d in resultado_exp.get("candidatas_detalles", [])
+                                }
+                                _carga_rec = cargas_gen_comp[0] if cargas_gen_comp else None
+                                _rec_claves = {s["clave"]: s for s in (_carga_rec["secciones"] if _carga_rec else [])}
+                                _ec_claves = {m["clave"] for m in _en_curso_reales}
+
+                                # --- Clasificar cada materia en curso ---
+                                filas_comparacion = []
+                                score_sum = 0.0
+                                peso_total = 0.0
+
+                                for mat in _en_curso_reales:
+                                    cl = mat["clave"]
+                                    en_candidatas = cl in _candidatas_dict
+                                    en_recomendada = cl in _rec_claves
+                                    prioridad = _candidatas_dict[cl]["prioridad"] if en_candidatas else None
+
+                                    if en_recomendada:
+                                        estado_comp = "✅ En recomendada"
+                                        color_estado = "#d1fae5"
+                                    elif en_candidatas:
+                                        estado_comp = "🟡 Candidata (no en top)"
+                                        color_estado = "#fef9c3"
+                                    else:
+                                        estado_comp = "⚠️ Fuera del sistema"
+                                        color_estado = "#fee2e2"
+
+                                    # Puntaje: 1.0 si coincide con recomendada, 0.6 si es candidata, 0.0 si fuera
+                                    if en_recomendada:
+                                        pts = 1.0
+                                    elif en_candidatas:
+                                        pts = 0.6
+                                    else:
+                                        pts = 0.0
+
+                                    # Ponderación inversa a la prioridad (prio 1 pesa más)
+                                    peso = (6 - prioridad) if prioridad else 1
+                                    score_sum += pts * peso
+                                    peso_total += max(peso, 1)
+
+                                    filas_comparacion.append({
+                                        "Clave": cl,
+                                        "Materia": mat["nombre"],
+                                        "Créditos": mat["creditos"],
+                                        "Estatus": mat["estatus"],
+                                        "Prioridad sistema": str(prioridad) if prioridad else "—",
+                                        "Resultado": estado_comp,
+                                    })
+
+                                # --- Materias recomendadas que NO está cursando ---
+                                _rec_no_cursadas = [
+                                    s for cl, s in _rec_claves.items() if cl not in _ec_claves
+                                ] if _rec_claves else []
+
+                                # --- Score de alineación ---
+                                score_alineacion = (score_sum / peso_total) if peso_total > 0 else 0.0
+
+                                # Cobertura: cuántas de las recomendadas sí están cursando
+                                n_rec = len(_rec_claves)
+                                n_coinciden = sum(1 for cl in _ec_claves if cl in _rec_claves)
+                                cobertura = n_coinciden / n_rec if n_rec > 0 else 0.0
+
+                                # Materias fuera del sistema experto
+                                n_fuera = sum(1 for m in _en_curso_reales if m["clave"] not in _candidatas_dict)
+
+                                # --- Métricas ---
+                                _col_s1, _col_s2, _col_s3, _col_s4 = st.columns(4)
+                                _col_s1.metric(
+                                    "Alineación general",
+                                    f"{score_alineacion:.0%}",
+                                    help="Qué tan bien corresponde la carga real con la recomendación (ponderado por prioridad)"
+                                )
+                                _col_s2.metric(
+                                    "Cobertura de recomendada",
+                                    f"{cobertura:.0%}",
+                                    help=f"Materias de la carga Recomendada que sí está cursando ({n_coinciden}/{n_rec})"
+                                )
+                                _col_s3.metric(
+                                    "Materias en curso",
+                                    len(_en_curso_reales),
+                                    help="Total de materias que el alumno está cursando este semestre"
+                                )
+                                _col_s4.metric(
+                                    "Fuera del sistema",
+                                    n_fuera,
+                                    delta=f"-{n_fuera}" if n_fuera > 0 else None,
+                                    delta_color="inverse",
+                                    help="Materias que el alumno está cursando pero el sistema experto no recomendó"
+                                )
+
+                                # Barra de interpretación
+                                if score_alineacion >= 0.80:
+                                    _interp = "🟢 **Excelente alineación.** La carga del estudiante corresponde muy bien con la recomendación del sistema."
+                                elif score_alineacion >= 0.55:
+                                    _interp = "🟡 **Alineación parcial.** El estudiante siguió parte de la recomendación pero hay diferencias importantes."
+                                else:
+                                    _interp = "🔴 **Baja alineación.** La carga real difiere significativamente de lo que el sistema recomendó."
+                                st.info(_interp)
+
+                                # --- Tabla de comparación ---
+                                st.markdown("**Detalle de materias en curso:**")
+                                import pandas as _pd_comp
+                                df_comp = _pd_comp.DataFrame(filas_comparacion)
+                                st.dataframe(df_comp, use_container_width=True, hide_index=True)
+
+                                # --- Materias recomendadas que no está cursando ---
+                                if _rec_no_cursadas:
+                                    with st.expander(f"📋 Materias de la carga Recomendada que NO está cursando ({len(_rec_no_cursadas)})"):
+                                        filas_pendientes = []
+                                        for s in _rec_no_cursadas:
+                                            filas_pendientes.append({
+                                                "Clave": s["clave"],
+                                                "Materia": s["nombre"],
+                                                "Créditos": s["creditos"],
+                                                "Prioridad": s["prioridad"],
+                                                "Horario": ", ".join(
+                                                    f"{b['dia'][:3]} {b['inicio']:02d}-{b['fin']:02d}"
+                                                    for b in s["horario"]
+                                                ),
+                                            })
+                                        st.dataframe(
+                                            _pd_comp.DataFrame(filas_pendientes),
+                                            use_container_width=True, hide_index=True
+                                        )
 
 
     # ===================================================================
@@ -2743,6 +2942,10 @@ def main():
                     horario = parsear_horario_seccion(row)
                     if not horario:
                         continue
+                    # Turno: matutino si la clase INICIA antes de las 14:00
+                    # (clases de 13-15 siguen siendo matutinas porque empiezan antes de las 2 PM)
+                    _inicio_min = min((b["inicio"] for b in horario), default=0)
+                    _turno = "☀️ Matutino" if _inicio_min < 14 else "🌙 Vespertino"
                     filas_cand.append({
                         "Prioridad": info.get("prioridad", "—"),
                         "Nivel": info.get("nivel", "—"),
@@ -2751,6 +2954,7 @@ def main():
                         "Semestre": info.get("ciclo", "—"),
                         "Créditos": info.get("creditos", "—"),
                         "Sección": int(row.get("Seccion", 0) or 0),
+                        "Turno": _turno,
                         "Profesor": str(row.get("Profesor", "")).strip(),
                         "Cupo": int(row.get("Cupo", 0) or 0),
                         "Inscritos": int(row.get("Inscritos", 0) or 0),
@@ -2766,17 +2970,21 @@ def main():
                     n_secs = len(df_cand_show)
                     st.success(f"**{n_mats} materias** candidatas tienen secciones en la oferta. Total: **{n_secs} secciones** disponibles.")
                     df_cand_show = df_cand_show.sort_values(["Prioridad", "Semestre", "Clave", "Sección"])
-                    st.dataframe(df_cand_show, use_container_width=True, hide_index=True, height=480)
-                    st.caption("Prioridad 1 = más urgente de cursar | Solo se muestran secciones con horario registrado en la oferta.")
 
-                    # ── Calendario semanal ──────────────────────────────────
-                    st.divider()
-                    st.subheader("🗓️ Calendario semanal de secciones candidatas")
-                    st.caption(
-                        "Cada color representa una materia distinta. "
-                        "Coloca el cursor sobre un bloque para ver nombre, sección, horario y espacio. "
-                        "Bloques en la misma columna y hora = secciones que se solapan (se muestran uno al lado del otro)."
-                    )
+                    _tab_mat, _tab_vesp = st.tabs(["☀️ Matutino", "🌙 Vespertino"])
+                    with _tab_mat:
+                        _df_mat = df_cand_show[df_cand_show["Turno"] == "☀️ Matutino"].drop(columns=["Turno"])
+                        if _df_mat.empty:
+                            st.info("No hay secciones matutinas disponibles para las materias candidatas.")
+                        else:
+                            st.dataframe(_df_mat, use_container_width=True, hide_index=True, height=420)
+                    with _tab_vesp:
+                        _df_vesp = df_cand_show[df_cand_show["Turno"] == "🌙 Vespertino"].drop(columns=["Turno"])
+                        if _df_vesp.empty:
+                            st.info("No hay secciones vespertinas disponibles para las materias candidatas.")
+                        else:
+                            st.dataframe(_df_vesp, use_container_width=True, hide_index=True, height=420)
+                    st.caption("Prioridad 1 = más urgente de cursar | Matutino: clases que inician antes de las 14:00 | Solo se muestran secciones con horario registrado en la oferta.")
 
                     import streamlit.components.v1 as _components_v1
 

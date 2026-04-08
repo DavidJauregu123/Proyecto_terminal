@@ -641,25 +641,31 @@ def aplicar_regla_d_preespecialidad(
     candidatas: Set[str],
     aprobadas: Set[str],
     mapa: List[Dict],
-    plan: str = "2021ID"
+    plan: str = "2021ID",
+    especialidad_forzada: Optional[str] = None,
+    aprobadas_para_deteccion: Optional[Set[str]] = None,
 ) -> Tuple[Set[str], int, Optional[str]]:
     """
     REGLA D (nueva lógica de preespecialidad):
 
-    Casos:
-    A) Alumno sin ninguna preespecialidad aprobada → mantener candidatas de AMBAS.
-    B) Alumno con avance en UNA sola especialidad (no terminada) → eliminar
-       candidatas de la otra especialidad.
-    C) Alumno con avance en AMBAS especialidades → mantener candidatas de ambas
-       hasta que una se complete. Una vez completa una, las materias pendientes
-       de la otra que estén en candidatas se tratan como ELECCION_LIBRE (se
-       mantienen también, porque el mapa ya las tiene en ciclos 3/4).
-    D) Una especialidad ya está completa → solo recomendar la que falta (o nada
-       si las dos están completas).
+    Si `especialidad_forzada` está indicada (TICS o BUSINESS_INTELLIGENCE), se
+    usa directamente como la especialidad del estudiante: se filtran las materias
+    de la otra línea y las que el alumno ya cursó de ella se tratan como EL.
+    Si no está forzada, se infiere con la lógica normal de 4 casos.
+
+    `aprobadas_para_deteccion` permite incluir materias EN_CURSO en la detección
+    de orientación sin que formen parte de `aprobadas` (para candidatas/prereqs).
+
+    Casos (cuando no hay forzada):
+    A) Sin avance en ninguna → mostrar ambas.
+    B) Avance en UNA sola (no terminada) → eliminar la otra.
+    C) Avance en AMBAS (ninguna completa) → mostrar ambas.
+    D) Una completa → mostrar solo la otra.
 
     Returns:
-        Tuple[Set[str], int, Optional[str]]:
-            (candidatas_filtradas, numero_eliminadas, especialidad_detectada)
+        Tuple[Set[str], int, Optional[str], Set[str]]:
+            (candidatas_filtradas, numero_eliminadas, especialidad_detectada,
+             claves_reclasificar_el)  # claves de la otra esp. que pasan como EL
     """
     ruta = Path(__file__).parent.parent / "data" / f"mapeo_especialidades_{plan}.json"
     try:
@@ -668,76 +674,72 @@ def aplicar_regla_d_preespecialidad(
     except Exception:
         return candidatas, 0, None
 
-    # Conteos de maetrias preespecialidad aprobadas por especialidad
-    conteos = {}
+    # Conjunto de aprobadas para detección (incluye en_curso si se pasaron)
+    aprobadas_det = aprobadas_para_deteccion if aprobadas_para_deteccion is not None else aprobadas
+
     claves_por_esp = {}
     for esp, claves in mapeo.items():
-        claves_upper = {str(c).strip().upper() for c in claves}
-        claves_por_esp[esp] = claves_upper
-        conteos[esp] = len(claves_upper & aprobadas)
+        claves_por_esp[esp] = {str(c).strip().upper() for c in claves}
 
     especialidades = list(mapeo.keys())
     especialidad_detectada = None
+    mapa_idx = {str(m.get("clave", "")).strip().upper(): m for m in mapa}
 
-    # ¿Cuál especialidad (si alguna) está completa?
+    def _claves_otra_esp_en_candidatas(esp_a_mantener: str) -> Set[str]:
+        """Devuelve claves candidatas que pertenecen a la preespecialidad contraria."""
+        claves_otra = set()
+        for esp in especialidades:
+            if esp != esp_a_mantener:
+                claves_otra.update(claves_por_esp.get(esp, set()))
+        resultado = set()
+        for clave in candidatas:
+            c = str(clave).strip().upper()
+            mat = mapa_idx.get(c)
+            if mat and "PREESP" in mat.get("categoria", "").upper() and c in claves_otra:
+                resultado.add(c)
+        return resultado
+
+    def _filtrar_candidatas(esp_a_mantener: str) -> Tuple[Set[str], int]:
+        """Elimina del conjunto candidato las materias de preespecialidad de la otra línea."""
+        reclasificar = _claves_otra_esp_en_candidatas(esp_a_mantener)
+        filtradas = candidatas - reclasificar
+        return filtradas, len(reclasificar)
+
+    # ── Especialidad forzada by the user ──────────────────────────────────────
+    if especialidad_forzada is not None:
+        especialidad_detectada = especialidad_forzada
+        # No se eliminan: pasan como Elección Libre para que el alumno decida
+        reclasificar_el = _claves_otra_esp_en_candidatas(especialidad_forzada)
+        return candidatas, 0, especialidad_detectada, reclasificar_el
+
+    # ── Inferencia automática (lógica de 4 casos) ─────────────────────────────
+    conteos = {esp: len(claves_por_esp[esp] & aprobadas_det) for esp in especialidades}
+
+    # ¿Cuál especialidad (si alguna) está completa según aprobadas reales?
     completa = _especialidad_completa(aprobadas, plan)
 
     if completa is not None:
-        # Una especialidad terminada: solo recomendar materias de la otra
-        # (la otra puede ser una EL si la termina, pero por ahora se muestran)
+        # Caso D: una especialidad terminada → eliminar sus pendientes, mostrar la otra
         especialidad_detectada = completa
-        otras_claves = set()
-        for esp in especialidades:
-            if esp != completa:
-                otras_claves.update(claves_por_esp.get(esp, set()))
-        # No eliminamos nada de candidatas aquí — las de la otra esp siguen siendo
-        # candidatas. Solo eliminamos las de la especialidad ya completa que aún
-        # podrían aparecer (no deberían, pero por si acaso).
-        mapa_idx = {str(m.get("clave", "")).strip().upper(): m for m in mapa}
-        candidatas_filtradas = set()
-        for clave in candidatas:
-            clave = str(clave).strip().upper()
-            mat = mapa_idx.get(clave)
-            if not mat:
-                candidatas_filtradas.add(clave)
-                continue
-            if "PREESP" in mat.get("categoria", "").upper() and clave in claves_por_esp.get(completa, set()):
-                continue  # ya completa, no recomendar sus pendientes
-            candidatas_filtradas.add(clave)
-        eliminadas = len(candidatas) - len(candidatas_filtradas)
-        return candidatas_filtradas, eliminadas, especialidad_detectada
+        filtradas, eliminadas = _filtrar_candidatas(completa)
+        return filtradas, eliminadas, especialidad_detectada, set()
 
     # Ninguna completa
     especialidades_con_avance = [esp for esp, cnt in conteos.items() if cnt > 0]
 
     if len(especialidades_con_avance) == 0:
         # Caso A: sin avance en ninguna → mostrar ambas
-        return candidatas, 0, None
+        return candidatas, 0, None, set()
 
     if len(especialidades_con_avance) == 1:
         # Caso B: solo una especialidad tocada → eliminar materias de la otra
         esp_detectada = especialidades_con_avance[0]
         especialidad_detectada = esp_detectada
-        claves_otras = set()
-        for esp in especialidades:
-            if esp != esp_detectada:
-                claves_otras.update(claves_por_esp.get(esp, set()))
-        mapa_idx = {str(m.get("clave", "")).strip().upper(): m for m in mapa}
-        candidatas_filtradas = set()
-        for clave in candidatas:
-            clave = str(clave).strip().upper()
-            mat = mapa_idx.get(clave)
-            if not mat:
-                candidatas_filtradas.add(clave)
-                continue
-            if "PREESP" in mat.get("categoria", "").upper() and clave in claves_otras:
-                continue
-            candidatas_filtradas.add(clave)
-        eliminadas = len(candidatas) - len(candidatas_filtradas)
-        return candidatas_filtradas, eliminadas, especialidad_detectada
+        filtradas, eliminadas = _filtrar_candidatas(esp_detectada)
+        return filtradas, eliminadas, especialidad_detectada, set()
 
     # Caso C: avance en AMBAS → mantener candidatas de las dos
-    return candidatas, 0, None
+    return candidatas, 0, None, set()
 
 
 def aplicar_regla_e_practicas_preespecialidad(
@@ -805,7 +807,9 @@ def aplicar_regla_e_practicas_preespecialidad(
 def ejecutar_sistema_experto(
     historial_academico: List[Dict],
     mapa_curricular: Optional[List[Dict]] = None,
-    plan_estudios: str = "2021ID"
+    plan_estudios: str = "2021ID",
+    especialidad_forzada: Optional[str] = None,
+    en_curso_para_especialidad: Optional[List[Dict]] = None,
 ) -> Dict:
     """
     Ejecuta el sistema experto de seriación para generar materias candidatas.
@@ -910,8 +914,17 @@ def ejecutar_sistema_experto(
     # =========================================================================
     # PASO 7: Aplicar REGLA D - Filtro de Preespecialidad
     # =========================================================================
-    candidatas, count_eliminadas_d, especialidad_detectada = aplicar_regla_d_preespecialidad(
-        candidatas, aprobadas, mapa_curricular, plan_estudios
+    # Para la detección de especialidad se combinan aprobadas + en_curso
+    # (las indicadas por el parámetro en_curso_para_especialidad), de modo
+    # que el haber empezado una línea este semestre sea suficiente señal.
+    _claves_en_curso_esp = {
+        str(m.get("clave", "")).strip().upper()
+        for m in (en_curso_para_especialidad or [])
+    }
+    candidatas, count_eliminadas_d, especialidad_detectada, claves_reclasificar_el = aplicar_regla_d_preespecialidad(
+        candidatas, aprobadas, mapa_curricular, plan_estudios,
+        especialidad_forzada=especialidad_forzada,
+        aprobadas_para_deteccion=aprobadas | _claves_en_curso_esp,
     )
 
     # =========================================================================
@@ -952,6 +965,10 @@ def ejecutar_sistema_experto(
 
         requisitos = obtener_prerequisitos(clave, mapa_curricular)
         categoria = materia_info.get("categoria", "")
+        # Si la especialidad fue forzada y esta materia es de la otra línea,
+        # se trata como elección libre (el alumno puede tomarla pero no es su preesp)
+        if clave in claves_reclasificar_el:
+            categoria = "ELECCION_LIBRE"
         ciclo = materia_info.get("ciclo", 0)
 
         # --- Determinar prioridad y razón ---
