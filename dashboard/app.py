@@ -21,6 +21,15 @@ from agents.sistema_experto_seriacion import (
     PREESP_ACUMULADAS_CICLO,
 )
 from config import settings
+from agents.agente_asesor import (
+    crear_agente,
+    ejecutar_consulta,
+    ejecutar_consulta_stream,
+    set_session_state,
+    simular_reprobacion,
+    ALL_TOOLS,
+)
+from langchain_core.messages import HumanMessage, AIMessage
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from generar_mapa_curricular import generar_mapa
@@ -713,6 +722,776 @@ def formatear_periodo(periodo: str) -> str:
     return f"{p} - {obtener_nombre_temporada(p)}"
 
 
+def _init_agente():
+    """Inicializa el agente y el estado del chat (se llama una vez)."""
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+    if "agente_executor" not in st.session_state:
+        st.session_state.agente_executor = None
+    if "chat_open" not in st.session_state:
+        st.session_state.chat_open = False
+
+    # Recrear agente si no existe o si cambió el modelo
+    _modelo_actual = "gemini-2.5-flash"
+    if st.session_state.agente_executor is None or st.session_state.get("_agente_modelo") != _modelo_actual:
+        try:
+            executor = crear_agente(modelo=_modelo_actual)
+            if executor:
+                st.session_state.agente_executor = executor
+                st.session_state._agente_modelo = _modelo_actual
+        except Exception:
+            pass
+
+    # Inyectar session_state al agente
+    session_dict = {}
+    for key in [
+        "datos_estudiante", "historial_df", "resultado_experto",
+        "creditos_totales", "creditos_acumulados",
+        "nivel_ingles_texto", "nivel_ingles_aprobado", "ingles_completo",
+        "codigos_ingles_aprobados", "cargas_generadas",
+        "especialidad_forzada",
+    ]:
+        if key in st.session_state:
+            session_dict[key] = st.session_state[key]
+    set_session_state(session_dict)
+
+
+
+import unicodedata as _unicodedata
+def _norm(s: str) -> str:
+    return _unicodedata.normalize("NFD", s.lower()).encode("ascii", "ignore").decode()
+
+# Mapa de pestanas para navegacion automatica
+_TAB_MAP = {
+    "historia academica": "Historia Académica",
+    "resumen general": "Historia Académica",
+    "progreso": "Historia Académica",
+    "creditos": "Historia Académica",
+    "promedio": "Historia Académica",
+    "ingles": "Historia Académica",
+    "deportiva": "Historia Académica",
+    "cultural": "Historia Académica",
+    "eleccion libre": "Historia Académica",
+    "especialidad": "Historia Académica",
+    "pre-especialidad": "Historia Académica",
+    "sistema experto": "Sistema Experto",
+    "candidatas": "Sistema Experto",
+    "generador de cargas": "Generador de Cargas",
+    "horarios": "Generador de Cargas",
+    "mapa curricular": "Mapa Curricular",
+    "oferta": "Oferta & Candidatas",
+}
+
+
+def _detectar_tab_en_respuesta(texto: str):
+    """Detecta si la respuesta del agente menciona una pestana del sistema."""
+    texto_lower = _norm(texto) if texto else ""
+    for keyword, tab_name in _TAB_MAP.items():
+        if _norm(keyword) in texto_lower:
+            return tab_name
+    return None
+
+
+def _enviar_mensaje_chat(texto: str):
+    """Procesa un mensaje en el chat del agente."""
+    st.session_state.chat_messages.append({"role": "user", "content": texto})
+
+    if st.session_state.agente_executor is None:
+        respuesta = "Asistente no disponible. Verificar que GEMINI_API_KEY este configurada en .env"
+    else:
+        lc_history = []
+        for msg in st.session_state.chat_messages[:-1]:
+            if msg["role"] == "user":
+                lc_history.append(HumanMessage(content=msg["content"]))
+            else:
+                lc_history.append(AIMessage(content=msg["content"]))
+
+        respuesta = ejecutar_consulta(
+            st.session_state.agente_executor,
+            texto,
+            chat_history=lc_history,
+        )
+
+    st.session_state.chat_messages.append({"role": "assistant", "content": respuesta})
+
+
+def _generar_pdf_asesoria() -> bytes:
+    """Genera un PDF completo de asesoria curricular con toda la informacion del estudiante."""
+    from io import BytesIO
+    from datetime import datetime
+
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.units import inch, cm
+        from reportlab.lib.colors import HexColor
+        from reportlab.platypus import (
+            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+            HRFlowable, KeepTogether,
+        )
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+    except ImportError:
+        return None
+
+    # ── Colores ──
+    C_PRIMARY = HexColor("#1a1a2e")
+    C_ACCENT = HexColor("#667eea")
+    C_GRAY = HexColor("#64748b")
+    C_LIGHT = HexColor("#f1f5f9")
+    C_RED = HexColor("#dc2626")
+    C_GREEN = HexColor("#16a34a")
+    C_ORANGE = HexColor("#ea580c")
+    C_WHITE = HexColor("#ffffff")
+    C_BLACK = HexColor("#0f172a")
+
+    # ── Estilos ──
+    styles = getSampleStyleSheet()
+    s_title = ParagraphStyle("T", parent=styles["Heading1"], fontSize=16, textColor=C_PRIMARY,
+                              spaceAfter=2, fontName="Helvetica-Bold")
+    s_subtitle = ParagraphStyle("ST", parent=styles["Normal"], fontSize=9, textColor=C_GRAY,
+                                 spaceAfter=10)
+    s_h2 = ParagraphStyle("H2", parent=styles["Heading2"], fontSize=12, textColor=C_PRIMARY,
+                           spaceBefore=14, spaceAfter=6, fontName="Helvetica-Bold")
+    s_h3 = ParagraphStyle("H3", parent=styles["Heading3"], fontSize=10, textColor=C_ACCENT,
+                           spaceBefore=8, spaceAfter=4, fontName="Helvetica-Bold")
+    s_body = ParagraphStyle("B", parent=styles["Normal"], fontSize=9, leading=13,
+                             textColor=C_BLACK, spaceAfter=2)
+    s_small = ParagraphStyle("SM", parent=s_body, fontSize=8, textColor=C_GRAY)
+    s_bold = ParagraphStyle("BD", parent=s_body, fontName="Helvetica-Bold")
+    s_alert = ParagraphStyle("AL", parent=s_body, textColor=C_RED, fontName="Helvetica-Bold")
+    s_ok = ParagraphStyle("OK", parent=s_body, textColor=C_GREEN, fontName="Helvetica-Bold")
+    s_chat_user = ParagraphStyle("CU", parent=s_body, leftIndent=10, textColor=C_PRIMARY,
+                                  fontName="Helvetica-Bold", fontSize=8, leading=11)
+    s_chat_bot = ParagraphStyle("CB", parent=s_body, leftIndent=10, textColor=C_GRAY,
+                                 fontSize=8, leading=11)
+
+    def _hr():
+        return HRFlowable(width="100%", thickness=0.5, color=HexColor("#e2e8f0"), spaceAfter=6, spaceBefore=6)
+
+    def _kv_table(rows):
+        """Tabla clave-valor compacta."""
+        t = Table(rows, colWidths=[140, 320])
+        t.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("TEXTCOLOR", (0, 0), (0, -1), C_GRAY),
+            ("TEXTCOLOR", (1, 0), (1, -1), C_BLACK),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        return t
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter,
+                            leftMargin=0.7*inch, rightMargin=0.7*inch,
+                            topMargin=0.5*inch, bottomMargin=0.5*inch)
+
+    story = []
+    now = datetime.now()
+    datos = st.session_state.get("datos_estudiante")
+
+    # ══════════════════════════════════════════════════════════
+    # HEADER
+    # ══════════════════════════════════════════════════════════
+    story.append(Paragraph("Reporte de Asesoria Curricular", s_title))
+    story.append(Paragraph(
+        f"Universidad del Caribe — Plan IDeIO 2021 — Generado: {now.strftime('%d/%m/%Y %H:%M')}",
+        s_subtitle
+    ))
+    story.append(_hr())
+
+    if not datos:
+        story.append(Paragraph("No hay datos del estudiante cargados.", s_body))
+        doc.build(story)
+        buf.seek(0)
+        return buf.getvalue()
+
+    # ══════════════════════════════════════════════════════════
+    # 1. DATOS DEL ESTUDIANTE
+    # ══════════════════════════════════════════════════════════
+    story.append(Paragraph("1. Datos del Estudiante", s_h2))
+    story.append(_kv_table([
+        ["Matricula:", str(datos.matricula)],
+        ["Nombre:", str(datos.nombre)],
+        ["Plan de estudios:", str(datos.plan_estudios)],
+        ["Situacion:", str(datos.situacion)],
+        ["Promedio general:", str(datos.promedio_general)],
+    ]))
+
+    # ══════════════════════════════════════════════════════════
+    # 2. AVANCE ACADEMICO
+    # ══════════════════════════════════════════════════════════
+    story.append(Paragraph("2. Avance Academico", s_h2))
+
+    cred_total = st.session_state.get("creditos_totales", 404)
+    cred_acum = st.session_state.get("creditos_acumulados", datos.total_creditos)
+    cred_falt = max(0, cred_total - cred_acum)
+    pct = round((cred_acum / cred_total) * 100, 1) if cred_total > 0 else 0
+
+    resultado = st.session_state.get("resultado_experto")
+    sem = resultado.get("semestre_cursado", 0) if resultado else 0
+    sem_obj = resultado.get("semestre_objetivo", 0) if resultado else 0
+    esp = resultado.get("especialidad_detectada", "No detectada") if resultado else "No detectada"
+
+    avance_esperado = round((sem / 8) * 100) if sem > 0 else 0
+    diferencia = pct - avance_esperado
+    if diferencia >= -5:
+        regularidad = "AL CORRIENTE"
+        reg_style = s_ok
+    elif diferencia >= -15:
+        regularidad = "LIGERAMENTE ATRASADO"
+        reg_style = ParagraphStyle("W", parent=s_body, textColor=C_ORANGE, fontName="Helvetica-Bold")
+    else:
+        regularidad = "SIGNIFICATIVAMENTE ATRASADO"
+        reg_style = s_alert
+
+    # Contar materias
+    df = st.session_state.get("historial_df")
+    n_aprobadas = 0
+    n_en_curso = 0
+    n_reprobadas_total = 0
+    if df is not None and not df.empty:
+        n_aprobadas = len(df[df["estatus"].str.upper() == "APROBADA"])
+        n_en_curso = len(df[df["estatus"].str.upper().isin(["EN_CURSO", "RECURSANDO"])])
+        n_reprobadas_total = len(df[df["estatus"].str.upper() == "REPROBADA"])
+
+    mapa = cargar_mapa_curricular()
+    if isinstance(mapa, dict):
+        total_mat = len(mapa)
+    elif isinstance(mapa, list):
+        total_mat = len(mapa)
+    else:
+        total_mat = 86
+    n_pendientes = total_mat - n_aprobadas
+
+    story.append(_kv_table([
+        ["Creditos:", f"{cred_acum} / {cred_total}  ({pct}%)  —  Faltan: {cred_falt}"],
+        ["Semestre actual:", f"{sem} de 8  —  Restantes: {max(0, 8 - sem)}"],
+        ["Materias aprobadas:", f"{n_aprobadas} de {total_mat}  —  Pendientes: {n_pendientes}  —  En curso: {n_en_curso}"],
+        ["Especialidad:", str(esp)],
+    ]))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(f"Regularidad: {regularidad}  (avance real {pct}% vs esperado ~{avance_esperado}%)", reg_style))
+
+    # ══════════════════════════════════════════════════════════
+    # 3. ALERTAS Y RIESGOS
+    # ══════════════════════════════════════════════════════════
+    story.append(Paragraph("3. Alertas y Riesgos", s_h2))
+
+    alertas = []
+    sit = str(datos.situacion).upper()
+    if "CONDICIONAL" in sit or "IRREGULAR" in sit:
+        alertas.append(f"Alumno con situacion {datos.situacion} — maximo 4 materias por semestre")
+
+    # Inglés
+    ing_ok = st.session_state.get("ingles_completo", False)
+    nivel_ing = st.session_state.get("nivel_ingles_texto", "No disponible")
+    if not ing_ok and sem >= 6:
+        alertas.append(f"Ingles incompleto en semestre avanzado (nivel actual: {nivel_ing})")
+
+    # Reprobadas multiples
+    if df is not None and not df.empty:
+        rep = df[df["estatus"].str.upper() == "REPROBADA"]
+        if not rep.empty:
+            conteo = rep.groupby("clave").size()
+            for clave, veces in conteo.items():
+                nombre_mat = ""
+                match = df[df["clave"] == clave]
+                if not match.empty:
+                    nombre_mat = match.iloc[0].get("nombre", "")
+                if veces >= 3:
+                    alertas.append(f"BAJA DEFINITIVA: {clave} {nombre_mat} ({veces} reprobaciones)")
+                elif veces == 2:
+                    alertas.append(f"TERCERA OPORTUNIDAD: {clave} {nombre_mat} — proximo intento es el ultimo")
+
+    if alertas:
+        for a in alertas:
+            story.append(Paragraph(f"  {a}", s_alert))
+    else:
+        story.append(Paragraph("Sin alertas. Situacion academica regular.", s_ok))
+
+    # ══════════════════════════════════════════════════════════
+    # 4. REQUISITOS DE EGRESO
+    # ══════════════════════════════════════════════════════════
+    story.append(Paragraph("4. Requisitos de Egreso", s_h2))
+
+    nivel_num = st.session_state.get("nivel_ingles_aprobado", 0)
+
+    requisitos_data = [
+        ["Requisito", "Estado", "Detalle"],
+        ["Ingles (Topicos 2)",
+         "Completo" if ing_ok else "Pendiente",
+         f"Nivel {nivel_num}/6 — {nivel_ing}"],
+    ]
+
+    req_table = Table(requisitos_data, colWidths=[150, 80, 230])
+    req_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), C_PRIMARY),
+        ("TEXTCOLOR", (0, 0), (-1, 0), C_WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ALIGN", (1, 0), (1, -1), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#e2e8f0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("BACKGROUND", (1, 1), (1, 1), HexColor("#dcfce7") if ing_ok else HexColor("#fee2e2")),
+    ]))
+    story.append(req_table)
+
+    # ── Numeracion dinamica ──
+    _sec = [4]  # ya usamos 1-4 arriba
+    def _secnum(titulo):
+        _sec[0] += 1
+        return f"{_sec[0]}. {titulo}"
+
+    # ══════════════════════════════════════════════════════════
+    # 5. MATERIAS CANDIDATAS (Sistema Experto)
+    # ══════════════════════════════════════════════════════════
+    story.append(Paragraph(_secnum("Materias Recomendadas para Siguiente Semestre"), s_h2))
+
+    if resultado and resultado.get("candidatas_detalles"):
+        candidatas = resultado["candidatas_detalles"]
+        story.append(Paragraph(
+            f"El sistema experto recomienda {len(candidatas)} materias para el semestre {sem_obj}.",
+            s_body
+        ))
+
+        por_prioridad = {}
+        for c in candidatas:
+            p = c.get("prioridad", 5)
+            por_prioridad.setdefault(p, []).append(c)
+
+        etiquetas = {1: "URGENTE", 2: "IMPORTANTE", 3: "RECOMENDADA", 4: "OPCIONAL", 5: "BAJA"}
+
+        for p in sorted(por_prioridad.keys()):
+            label = etiquetas.get(p, "?")
+            story.append(Paragraph(f"Prioridad {p} — {label}", s_h3))
+
+            table_data = [["Clave", "Materia", "Ciclo", "Cr", "Razon"]]
+            for c in por_prioridad[p]:
+                table_data.append([
+                    str(c.get("clave", "")),
+                    str(c.get("nombre", ""))[:40],
+                    str(c.get("ciclo", "")),
+                    str(c.get("creditos", "")),
+                    str(c.get("razon", ""))[:50],
+                ])
+
+            t = Table(table_data, colWidths=[50, 160, 35, 25, 190])
+            t.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), C_PRIMARY),
+                ("TEXTCOLOR", (0, 0), (-1, 0), C_WHITE),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+                ("ALIGN", (2, 0), (3, -1), "CENTER"),
+                ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#e2e8f0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [C_WHITE, C_LIGHT]),
+            ]))
+            story.append(t)
+    else:
+        story.append(Paragraph(
+            "El sistema experto aun no se ha ejecutado. Cargar documentos y revisar la pestana Sistema Experto.",
+            s_small
+        ))
+
+    # ══════════════════════════════════════════════════════════
+    # 6. COMPARACION CARGA ACTUAL VS RECOMENDADA
+    # ══════════════════════════════════════════════════════════
+    story.append(Paragraph(_secnum("Comparacion: Carga Actual vs Recomendada"), s_h2))
+
+    en_curso_claves = set()
+    if df is not None and not df.empty:
+        en_curso_claves = set(df[df["estatus"].str.upper().isin(["EN_CURSO", "RECURSANDO"])]["clave"].str.upper())
+
+    if not en_curso_claves:
+        story.append(Paragraph("El estudiante no tiene materias en curso registradas.", s_small))
+    elif not resultado:
+        story.append(Paragraph("El sistema experto no se ha ejecutado. No se puede comparar.", s_small))
+    else:
+        candidatas_claves = {c["clave"].upper() for c in resultado.get("candidatas_detalles", [])}
+        coinciden = en_curso_claves & candidatas_claves
+        solo_curso = en_curso_claves - candidatas_claves
+        solo_rec = candidatas_claves - en_curso_claves
+
+        story.append(_kv_table([
+            ["En curso:", f"{len(en_curso_claves)} materias"],
+            ["Coinciden con recomendacion:", f"{len(coinciden)}  ({', '.join(sorted(coinciden)) if coinciden else '-'})"],
+        ]))
+
+        if solo_curso:
+            story.append(Paragraph(
+                f"Cursando pero NO recomendadas: {', '.join(sorted(solo_curso))}",
+                ParagraphStyle("W2", parent=s_body, textColor=C_ORANGE)
+            ))
+        if solo_rec:
+            top_rec = sorted(solo_rec)[:8]
+            story.append(Paragraph(
+                f"Recomendadas pero NO cursando: {', '.join(top_rec)}"
+                + (f" (+{len(solo_rec)-8} mas)" if len(solo_rec) > 8 else ""),
+                s_body
+            ))
+        if not solo_curso and not solo_rec:
+            story.append(Paragraph("La carga actual es consistente con las recomendaciones.", s_ok))
+
+    # ══════════════════════════════════════════════════════════
+    # 7. HISTORIAL DE REPROBADAS
+    # ══════════════════════════════════════════════════════════
+    story.append(Paragraph(_secnum("Historial de Materias Reprobadas"), s_h2))
+
+    has_reprobadas = False
+    if df is not None and not df.empty:
+        rep = df[df["estatus"].str.upper() == "REPROBADA"]
+        if not rep.empty:
+            has_reprobadas = True
+            rep_data = [["Clave", "Materia", "Calificacion", "Periodo", "Intentos"]]
+            conteo = rep.groupby("clave").size()
+            for clave in conteo.index:
+                filas = rep[rep["clave"] == clave]
+                nombre = filas.iloc[0].get("nombre", "")
+                for _, row in filas.iterrows():
+                    rep_data.append([
+                        str(row.get("clave", "")),
+                        str(nombre)[:35],
+                        str(row.get("calificacion", "")),
+                        str(row.get("periodo", "")),
+                        str(int(conteo[clave])),
+                    ])
+
+            t = Table(rep_data, colWidths=[50, 180, 65, 65, 50])
+            t.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), C_PRIMARY),
+                ("TEXTCOLOR", (0, 0), (-1, 0), C_WHITE),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+                ("ALIGN", (2, 0), (-1, -1), "CENTER"),
+                ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#e2e8f0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [C_WHITE, HexColor("#fff1f2")]),
+            ]))
+            story.append(t)
+
+    if not has_reprobadas:
+        story.append(Paragraph("El estudiante no tiene materias reprobadas.", s_ok))
+
+    # ══════════════════════════════════════════════════════════
+    # 8. CONVERSACION DE ASESORIA
+    # ══════════════════════════════════════════════════════════
+    story.append(Paragraph(_secnum("Registro de Consultas al Asistente"), s_h2))
+
+    if st.session_state.chat_messages:
+        story.append(Paragraph(
+            "Preguntas realizadas durante la sesion de asesoria y respuestas del sistema.",
+            s_small
+        ))
+        story.append(Spacer(1, 4))
+
+        for msg in st.session_state.chat_messages:
+            if msg["role"] == "user":
+                story.append(Paragraph(f"Asesor:  {msg['content']}", s_chat_user))
+            else:
+                texto = msg["content"].replace("\n", "<br/>").replace("  ", " ")
+                if len(texto) > 800:
+                    texto = texto[:800] + "..."
+                story.append(Paragraph(f"Sistema:  {texto}", s_chat_bot))
+            story.append(Spacer(1, 3))
+    else:
+        story.append(Paragraph("No se realizaron consultas al asistente durante esta sesion.", s_small))
+
+    # ══════════════════════════════════════════════════════════
+    # FOOTER
+    # ══════════════════════════════════════════════════════════
+    story.append(Spacer(1, 16))
+    story.append(_hr())
+    story.append(Paragraph(
+        f"Documento generado automaticamente por el Sistema Experto de Asesoria Curricular — "
+        f"{now.strftime('%d/%m/%Y %H:%M')}",
+        ParagraphStyle("FT", parent=s_small, alignment=TA_CENTER)
+    ))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# Chips de accion rapida
+_CHIPS = [
+    "Como va este estudiante?",
+    "Esta en riesgo?",
+    "Que deberia cargar?",
+    "Materias criticas por seriacion",
+    "Que pasa si reprueba Calculo?",
+    "Requisitos para egresar",
+]
+
+
+@st.dialog("Asistente Curricular", width="large")
+def _chat_dialog():
+    """Dialog modal con el chat del agente."""
+
+    st.markdown("""
+    <style>
+    div[data-testid="stDialog"] > div {border-radius:12px;}
+    div[data-testid="stDialog"] h2 {font-size:1.05rem;font-weight:600;letter-spacing:-.01em;color:#1a1a2e;}
+    div[data-testid="stChatMessage"] {padding:10px 14px;margin:2px 0;border-radius:10px;}
+    div[data-testid="stChatMessage"] p {font-size:14px;line-height:1.55;}
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ── Toolbar ──
+    t1, t2, t3 = st.columns([5, 1, 1])
+    with t1:
+        st.caption("Consulta situacion academica, materias, seriacion o requisitos.")
+    with t2:
+        if st.session_state.chat_messages:
+            pdf_bytes = _generar_pdf_asesoria()
+            if pdf_bytes:
+                st.download_button(
+                    "PDF",
+                    data=pdf_bytes,
+                    file_name="asesoria_curricular.pdf",
+                    mime="application/pdf",
+                    key="download_pdf_btn",
+                    use_container_width=True,
+                )
+    with t3:
+        if st.button("Limpiar", key="clear_chat_btn", type="tertiary"):
+            st.session_state.chat_messages = []
+            st.rerun(scope="fragment")
+
+    # ── Mensajes ──
+    chat_container = st.container(height=370)
+    with chat_container:
+        for msg in st.session_state.chat_messages:
+            role = "human" if msg["role"] == "user" else "assistant"
+            with st.chat_message(role):
+                st.markdown(msg["content"])
+
+    # ── Boton de navegacion si la ultima respuesta menciona una pestana ──
+    if st.session_state.chat_messages:
+        last_msg = st.session_state.chat_messages[-1]
+        if last_msg["role"] == "assistant":
+            tab_detectada = _detectar_tab_en_respuesta(last_msg["content"])
+            if tab_detectada:
+                if st.button(f"Ir a: {tab_detectada}", key="nav_tab_btn", type="primary", use_container_width=True):
+                    st.session_state._navigate_tab = tab_detectada
+                    st.rerun()  # full rerun cierra dialog y navega
+
+    # ── Chips de accion rapida (2 filas de 3) ──
+    if not st.session_state.chat_messages:
+        row1 = st.columns(3)
+        for i in range(3):
+            with row1[i]:
+                if st.button(_CHIPS[i], key=f"chip_{i}", use_container_width=True):
+                    with st.spinner("Consultando..."):
+                        _enviar_mensaje_chat(_CHIPS[i])
+                    st.rerun(scope="fragment")
+        row2 = st.columns(3)
+        for i in range(3, 6):
+            with row2[i - 3]:
+                if st.button(_CHIPS[i], key=f"chip_{i}", use_container_width=True):
+                    with st.spinner("Consultando..."):
+                        _enviar_mensaje_chat(_CHIPS[i])
+                    st.rerun(scope="fragment")
+
+    # ── Input libre ──
+    with st.form("agent_chat_form", clear_on_submit=True, border=False):
+        cols = st.columns([6, 1])
+        with cols[0]:
+            user_input = st.text_input(
+                "q",
+                placeholder="Escribe tu consulta...",
+                label_visibility="collapsed",
+            )
+        with cols[1]:
+            submitted = st.form_submit_button("Enviar", use_container_width=True)
+
+    if submitted and user_input and user_input.strip():
+        with st.spinner("Consultando..."):
+            _enviar_mensaje_chat(user_input.strip())
+        st.rerun(scope="fragment")
+
+
+def _render_agente_chat():
+    """Renderiza la burbuja flotante del agente, visible en todas las vistas."""
+    import streamlit.components.v1 as components
+
+    _init_agente()
+
+    if st.button("open_agent", key="agent_bubble_btn"):
+        _chat_dialog()
+
+    # ── Navegacion pendiente: clic en la pestana via JS ──
+    pending_tab = st.session_state.pop("_navigate_tab", None)
+    if pending_tab:
+        import streamlit.components.v1 as _nav_comp
+        # Los tabs de Streamlit son button[role="tab"] con el texto del tab
+        _nav_comp.html(f"""
+        <script>
+        (function() {{
+            const pdoc = window.parent.document;
+            const target = "{pending_tab}";
+            const tabs = pdoc.querySelectorAll('button[role="tab"]');
+            for (const tab of tabs) {{
+                if (tab.textContent.includes(target)) {{
+                    tab.click();
+                    tab.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                    break;
+                }}
+            }}
+        }})();
+        </script>
+        """, height=0)
+
+    components.html("""
+    <script>
+    (function() {
+        const pdoc = window.parent.document;
+
+        function hideAgentBtn() {
+            pdoc.querySelectorAll('button[kind="secondary"]').forEach(b => {
+                if (b.textContent.trim() === 'open_agent') {
+                    let el = b;
+                    for (let i = 0; i < 5 && el; i++) {
+                        el = el.parentElement;
+                        if (el && el.getAttribute &&
+                            (el.getAttribute('data-testid') === 'stButton' ||
+                             el.getAttribute('data-testid') === 'element-container')) {
+                            el.style.cssText = 'position:fixed!important;bottom:-9999px!important;' +
+                                'left:-9999px!important;width:1px!important;height:1px!important;' +
+                                'overflow:hidden!important;opacity:0!important;';
+                            return;
+                        }
+                    }
+                    b.parentElement.style.cssText =
+                        'position:fixed!important;bottom:-9999px!important;left:-9999px!important;' +
+                        'width:1px!important;height:1px!important;overflow:hidden!important;' +
+                        'opacity:0!important;';
+                }
+            });
+        }
+
+        hideAgentBtn();
+        const obs = new MutationObserver(hideAgentBtn);
+        obs.observe(pdoc.body, { childList: true, subtree: true });
+
+        function findTargetBtn() {
+            let btn = null;
+            pdoc.querySelectorAll('button[kind="secondary"]').forEach(b => {
+                if (b.textContent.trim() === 'open_agent') btn = b;
+            });
+            return btn;
+        }
+
+        if (pdoc.getElementById('agent-chat-bubble')) return;
+
+        const css = pdoc.createElement('style');
+        css.textContent = `
+            #agent-chat-bubble {
+                position: fixed;
+                bottom: 24px;
+                right: 24px;
+                z-index: 999999;
+                width: 56px;
+                height: 56px;
+                border-radius: 16px;
+                background: #1a1a2e;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                border: none;
+                outline: none;
+                box-shadow: 0 2px 12px rgba(0,0,0,.18);
+                transition: transform .2s ease, box-shadow .2s ease, background .2s ease;
+            }
+            #agent-chat-bubble:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(0,0,0,.25);
+                background: #2d2d4e;
+            }
+            #agent-chat-bubble:active {
+                transform: translateY(0) scale(.96);
+            }
+            #agent-chat-bubble svg {
+                width: 24px;
+                height: 24px;
+                fill: none;
+                stroke: #fff;
+                stroke-width: 1.8;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+            #agent-bubble-tooltip {
+                position: fixed;
+                bottom: 38px;
+                right: 90px;
+                background: #1a1a2e;
+                color: #fff;
+                padding: 6px 12px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 500;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+                white-space: nowrap;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity .2s ease;
+                z-index: 999998;
+                letter-spacing: -.01em;
+            }
+            #agent-bubble-tooltip::after {
+                content: '';
+                position: absolute;
+                right: -5px;
+                top: 50%;
+                transform: translateY(-50%);
+                border: 5px solid transparent;
+                border-left-color: #1a1a2e;
+            }
+            #agent-chat-bubble:hover ~ #agent-bubble-tooltip {
+                opacity: 1;
+            }
+        `;
+        pdoc.head.appendChild(css);
+
+        const bubble = pdoc.createElement('button');
+        bubble.id = 'agent-chat-bubble';
+        bubble.setAttribute('aria-label', 'Abrir asistente curricular');
+        bubble.innerHTML = `
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7
+                    8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8
+                    8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48
+                    0 0 1 8 8v.5z"/>
+            </svg>`;
+        bubble.onclick = function() {
+            const btn = findTargetBtn();
+            if (btn) btn.click();
+        };
+
+        const tip = pdoc.createElement('div');
+        tip.id = 'agent-bubble-tooltip';
+        tip.textContent = 'Asistente curricular';
+
+        const wrap = pdoc.createElement('div');
+        wrap.id = 'agent-bubble-wrap';
+        wrap.appendChild(bubble);
+        wrap.appendChild(tip);
+        pdoc.body.appendChild(wrap);
+    })();
+    </script>
+    """, height=0)
+
+
+
 def main():
     """Función principal de la aplicación"""
 
@@ -911,6 +1690,7 @@ def main():
     # Verificar si hay datos
     if "datos_estudiante" not in st.session_state:
         st.info("👆 Carga primero el **Historial Académico** y luego el **Kardex** en el panel lateral para comenzar")
+        _render_agente_chat()
         return
 
     datos = st.session_state.datos_estudiante
@@ -940,6 +1720,8 @@ def main():
         return int(c) if c is not None else None
 
     for _df in (historial_df, historial_filtrado):
+        if "clave" not in _df.columns:
+            continue
         _override = _df["clave"].apply(_ciclo_oficial)
         _df["ciclo"] = _override.combine_first(_df["ciclo"].astype("float64")).astype("Int64")
 
@@ -3295,6 +4077,11 @@ def main():
                             for _cc in sorted(_con_conflicto):
                                 _nm_cc = cand_lookup2.get(_cc, {}).get("nombre", _cc)
                                 st.markdown(f"- `{_cc}` — {_nm_cc} (choca permanentemente con {_siempre_con[_cc]} materia(s))")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    #  AGENTE ASESOR — Chat persistente (visible en todas las pestañas)
+    # ═══════════════════════════════════════════════════════════════════════
+    _render_agente_chat()
 
 
 if __name__ == "__main__":
