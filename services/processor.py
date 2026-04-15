@@ -100,7 +100,7 @@ class AcademicProcessor:
         
         resultado = {}
         for ciclo, datos in progreso_por_ciclo.items():
-            porcentaje = (datos["finalizadas"] / (datos["total"] - datos["pendientes"]) * 100) if (datos["total"] - datos["pendientes"]) > 0 else 0
+            porcentaje = (datos["finalizadas"] / datos["total"] * 100) if datos["total"] > 0 else 0
             resultado[ciclo] = ProgresoCiclo(
                 ciclo=ciclo,
                 finalizadas=datos["finalizadas"],

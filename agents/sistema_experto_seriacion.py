@@ -952,6 +952,22 @@ def ejecutar_sistema_experto(
         k = str(m.get("clave", "")).strip().upper()
         nombre_lookup[k] = m.get("nombre", k)
 
+    # Construir índice inverso: clave → conjunto de materias que la tienen como prereq
+    sucesoras_de: dict = {}
+    for m in mapa_curricular:
+        k = str(m.get("clave", "")).strip().upper()
+        for req in obtener_prerequisitos(k, mapa_curricular):
+            sucesoras_de.setdefault(req, set()).add(k)
+
+    # Prereqs faltantes retroactivos: candidatas que son prereq de una o más
+    # materias que el alumno YA aprobó (se adelantó y tomó la sucesora primero)
+    prereq_faltante_retro: dict[str, set] = {}
+    for clave_cand in candidatas:
+        clave_cand = str(clave_cand).strip().upper()
+        sucesoras_aprobadas = sucesoras_de.get(clave_cand, set()) & aprobadas
+        if sucesoras_aprobadas:
+            prereq_faltante_retro[clave_cand] = sucesoras_aprobadas
+
     detalles = []
     for clave in sorted(candidatas):
         clave = str(clave).strip().upper()
@@ -971,36 +987,56 @@ def ejecutar_sistema_experto(
             categoria = "ELECCION_LIBRE"
         ciclo = materia_info.get("ciclo", 0)
 
-        # --- Determinar prioridad y razón ---
-        # Nivel 1: Tiene prerequisitos definidos Y todos aprobados Y no es reprobada
-        #          (cadena natural: pasó el prereq → le toca esta)
         tiene_prereqs = len(requisitos) > 0
         prereqs_nombres = [f"{r} ({nombre_lookup.get(r, r)})" for r in requisitos]
 
-        if tiene_prereqs and clave not in reprobadas_pendientes:
+        # --- Determinar prioridad y razón ---
+        # P1: Prerequisito faltante retroactivo — el alumno ya aprobó una sucesora
+        #     pero nunca cursó este prereq (caso "se adelantó", ej: aprobó Cálculo
+        #     Integral sin haber pasado Cálculo Diferencial → Diferencial es P1)
+        # P2: Reprobadas — pendientes de recursar
+        # P3: Pendientes de ciclos anteriores — ciclo < semestre_objetivo
+        #     (cerrar ciclos atrasados, ordenadas del ciclo más viejo al más reciente)
+        # P4: Ciclo actual / progresión natural — ciclo >= semestre_objetivo
+        #     (materias que corresponden al semestre objetivo o adelantadas)
+        # P5: Elección libre / preespecialidad reclasificada
+        # P6: Co-curriculares pendientes (inglés, talleres) — EXTRACURRICULAR
+        #     Solo aparece si el alumno aún tiene pendientes; si ya terminó todos
+        #     no habrá materias en este nivel.
+
+        es_extracurricular = categoria == "EXTRACURRICULAR"
+        es_libre = categoria == "ELECCION_LIBRE"  # reclasificada de PRE-ESPECIALIDAD
+
+        if clave in prereq_faltante_retro:
+            sucesoras_str = ", ".join(
+                f"{s} ({nombre_lookup.get(s, s)})" for s in sorted(prereq_faltante_retro[clave])
+            )
             prioridad = 1
-            nivel = "Materias con prerequisito aprobado"
-            razon = f"Prerequisito cumplido: {', '.join(prereqs_nombres)}"
+            nivel = "Prerequisito faltante retroactivo"
+            razon = f"Ya aprobaste: {sucesoras_str}, pero aún falta este prerequisito"
         elif clave in reprobadas_pendientes:
             prioridad = 2
             nivel = "Materias reprobadas"
             razon = "Reprobada anteriormente, pendiente de recursar"
-        elif categoria == "BASICA":
+        elif es_extracurricular:
+            prioridad = 6
+            nivel = "Co-curriculares pendientes"
+            razon = "Inglés o actividad co-curricular pendiente"
+        elif es_libre:
+            prioridad = 5
+            nivel = "Elección libre"
+            razon = "Electiva disponible (línea no seleccionada como especialidad)"
+        elif ciclo < semestre_objetivo:
             prioridad = 3
-            nivel = "Materias básicas de ciclos anteriores"
-            razon = f"Materia básica pendiente del ciclo {ciclo}"
-        elif categoria in ("ELECCION_LIBRE", "PREESPECIALIDAD"):
-            prioridad = 4
-            nivel = "Asignaturas de elección libre"
-            razon = f"Electiva disponible ({categoria.replace('_', ' ').title()})"
-        elif clave.startswith(("AD", "TA")):
-            prioridad = 5
-            nivel = "Talleres deportivos y culturales"
-            razon = "Taller disponible"
+            nivel = "Pendientes de semestres anteriores"
+            razon = f"Pendiente del semestre {ciclo} — cerrar semestre para avanzar"
         else:
-            prioridad = 5
-            nivel = "Asignaturas de elección libre"
-            razon = "Materia disponible"
+            prioridad = 4
+            nivel = "Semestre actual"
+            razon = (
+                f"Materia del semestre {ciclo}"
+                + (f" — prerrequisitos cumplidos: {', '.join(prereqs_nombres)}" if tiene_prereqs else "")
+            )
 
         detalles.append({
             "clave": clave,

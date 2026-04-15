@@ -1,6 +1,6 @@
 """
-Agente Asesor Curricular — LangChain + LangGraph + Gemini.
-7 tools inteligentes con análisis pre-computado para asesor curricular.
+Agente Asesor Curricular — LangChain + LangGraph + OpenRouter (DeepSeek V3).
+12 tools inteligentes con análisis pre-computado para asesor curricular.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any, Dict, Generator, List, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from agents.knowledge_base import SYSTEM_PROMPT
@@ -152,7 +152,7 @@ def resumen_estudiante() -> str:
     else:
         regularidad = "SIGNIFICATIVAMENTE ATRASADO"
 
-    # Riesgo
+    # Riesgo — combinar checks propios + alertas del procesador
     riesgos = []
     if es_condicional:
         riesgos.append("Alumno CONDICIONAL (máx 4 materias)")
@@ -162,6 +162,17 @@ def resumen_estudiante() -> str:
         riesgos.append("Tiene materias con BAJA DEFINITIVA")
     if not ing_ok and sem >= 6:
         riesgos.append("Inglés incompleto y ya va en semestre avanzado")
+    # Alertas del procesador (MATERIAS_REPROBADAS, ATRASO_PRÁCTICAS, PREREQUISITO_SALTADO, etc.)
+    alertas_proc = _session_ref.get("alertas_academicas") or []
+    for alerta in alertas_proc:
+        tipo = alerta.get("tipo", "")
+        desc = alerta.get("descripcion", "")
+        sev = alerta.get("severidad", "")
+        # Evitar duplicar lo que ya chequeamos arriba
+        if tipo in ("TERCERA_OPORTUNIDAD", "BAJA_AUTOMÁTICA"):
+            continue
+        prefijo = "🔴" if sev == "CRITICA" else "🟠"
+        riesgos.append(f"{prefijo} {tipo}: {desc}")
 
     out = (
         f"DATOS: {datos.matricula} | {datos.nombre} | {datos.situacion}\n"
@@ -360,7 +371,7 @@ def consultar_historial(filtro: str = "") -> str:
         return f"Sin materias con estatus '{filtro}'."
 
     lineas = []
-    for _, row in df_f.head(25).iterrows():
+    for _, row in df_f.iterrows():
         lineas.append(
             f"- {row.get('clave','?')} {row.get('nombre','?')} | C{row.get('ciclo','?')} | "
             f"{row.get('estatus','?')} | {row.get('calificacion','')} | P:{row.get('periodo','')}"
@@ -378,8 +389,6 @@ def consultar_historial(filtro: str = "") -> str:
                 extra += f"  ⚠ {clave} {nombre}: {veces} reprobaciones\n"
 
     out = f"Total: {len(df_f)}\n" + "\n".join(lineas)
-    if len(df_f) > 25:
-        out += f"\n...+{len(df_f) - 25} más."
     return out + extra
 
 
@@ -487,6 +496,436 @@ def consultar_cargas() -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  TOOL 8: Elección Libre — progreso por ciclo
+# ═══════════════════════════════════════════════════════════════════════════
+
+@tool
+def consultar_eleccion_libre() -> str:
+    """Progreso del alumno en materias de Elección Libre por ciclo. Para preguntas como '¿cuántas elecciones libres le faltan?', '¿cuántas EL lleva en ciclo X?', '¿cómo va con las EL?'."""
+    el_info = _session_ref.get("eleccion_libre_info")
+    if not el_info:
+        return "Datos de elección libre no disponibles. Cargar documentos primero."
+
+    ciclos = el_info.get("ciclos", {})
+    pre_tit = el_info.get("pre_titulacion", "No detectada")
+    pre_count = el_info.get("pre_count", {})
+
+    lineas = [f"Pre-especialidad de titulación: {pre_tit}\n"]
+    labels = {1: "Ciclo 1", 2: "Ciclo 2", "3_y_4": "Ciclos 3 y 4"}
+    requeridos = {1: 2, 2: 2, "3_y_4": 8}
+
+    total_aprobadas = 0
+    total_requeridas = 0
+
+    for key, label in labels.items():
+        d = ciclos.get(key, {})
+        aprobadas = d.get("aprobadas", 0)
+        en_curso = d.get("en_curso", 0)
+        requeridas = requeridos.get(key, 0)
+        faltan = max(0, requeridas - aprobadas)
+        total_aprobadas += aprobadas
+        total_requeridas += requeridas
+        claves = d.get("claves", [])
+        nombres = d.get("nombres", [])
+        mat_str = ", ".join(f"{c} ({n})" for c, n in zip(claves, nombres)) if claves else "Ninguna"
+        lineas.append(
+            f"{label}: {aprobadas}/{requeridas} aprobadas | {en_curso} en curso | faltan {faltan}\n"
+            f"  Materias: {mat_str}"
+        )
+
+    lineas.append(f"\nTOTAL EL: {total_aprobadas}/{total_requeridas} aprobadas | faltan {max(0, total_requeridas - total_aprobadas)}")
+
+    # Progreso preesp de la no usada (pueden contar como EL)
+    pre_no_usada = [k for k in pre_count.keys() if k != pre_tit]
+    for p in pre_no_usada:
+        cnt = pre_count.get(p, 0)
+        if cnt > 0:
+            lineas.append(f"  Nota: tiene {cnt} materia(s) de {p} (pre-esp no usada) que pueden contar como EL en ciclos 3-4.")
+
+    return "\n".join(lineas)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  TOOL 9: Pre-especialidades — progreso por línea
+# ═══════════════════════════════════════════════════════════════════════════
+
+@tool
+def consultar_preespecialidades() -> str:
+    """Progreso del alumno en cada pre-especialidad (TICS, Business Intelligence). Para '¿cómo va en pre-especialidad?', '¿cuántas materias de TICS tiene?', '¿cuál es su especialidad?'."""
+    mapa = _cargar_mapa()
+    df = _session_ref.get("historial_df")
+
+    # Construir lookup estatus + nombre más reciente por clave
+    estatus_clave: dict = {}
+    if df is not None and not df.empty:
+        for _, row in df.iterrows():
+            clave = str(row.get("clave", "")).upper()
+            est = str(row.get("estatus", "")).upper()
+            per = str(row.get("periodo", ""))
+            nom = str(row.get("nombre", ""))
+            prev = estatus_clave.get(clave)
+            if prev is None or per >= prev["periodo"]:
+                estatus_clave[clave] = {"estatus": est, "periodo": per, "nombre": nom}
+
+    # Determinar especialidad activa (forzada > detectada)
+    resultado = _session_ref.get("resultado_experto")
+    esp_forzada = str(_session_ref.get("especialidad_forzada") or "")
+    esp_detectada_raw = (resultado.get("especialidad_detectada", "") or "") if resultado else ""
+    esp_activa = (esp_forzada or esp_detectada_raw).upper().strip()
+
+    _ESP_A_TRACK = {
+        "BUSINESS_INTELLIGENCE": "Inteligencia Organizacional y de Negocios",
+        "ION": "Inteligencia Organizacional y de Negocios",
+        "TICS": "Innovación en TIC",
+        "ITIC": "Innovación en TIC",
+    }
+    track_principal = _ESP_A_TRACK.get(esp_activa)
+    esp_label = esp_activa.replace("_", " ").title() if esp_activa else "No detectada"
+
+    # Construir mapa completo de tracks desde el JSON (siempre ambas líneas)
+    preesp_mapa: dict[str, list] = {}
+    for c, info in mapa.items():
+        cat = info.get("categoria", "").upper()
+        if "PREESP" not in cat and "PRE_ESP" not in cat and "PRE-ESP" not in cat:
+            continue
+        nombre_m = info.get("nombre", "")
+        if "inteligencia" in nombre_m.lower() and ("negocios" in nombre_m.lower() or "organizacional" in nombre_m.lower()):
+            track = "Inteligencia Organizacional y de Negocios"
+        elif "innovaci" in nombre_m.lower() and "tic" in nombre_m.lower():
+            track = "Innovación en TIC"
+        elif c in ["ID3420", "ID3421", "ID3422", "ID3423", "ID3424"]:
+            track = "Inteligencia Organizacional y de Negocios"
+        elif c in ["ID3416", "ID3417", "ID3418", "ID3419", "ID3469"]:
+            track = "Innovación en TIC"
+        else:
+            continue
+        preesp_mapa.setdefault(track, []).append(c)
+
+    if not preesp_mapa:
+        return "No se encontraron materias de pre-especialidad en el mapa curricular."
+
+    # Track principal primero
+    tracks_ordenados = sorted(preesp_mapa.keys(), key=lambda t: (0 if t == track_principal else 1))
+
+    partes = []
+    if track_principal:
+        partes.append(f"**Especialidad activa: {esp_label}**")
+    else:
+        partes.append("**Especialidad activa:** No detectada (el sistema no ha identificado una línea principal)")
+    partes.append("")
+
+    for track in tracks_ordenados:
+        todas_claves = preesp_mapa[track]
+
+        aprobadas_lista = []
+        reprobadas_lista = []
+        faltan_lista = []
+
+        for c in todas_claves:
+            info_hist = estatus_clave.get(c, {})
+            est = info_hist.get("estatus", "")
+            nombre_mat = info_hist.get("nombre") or mapa.get(c, {}).get("nombre", c)
+            entrada = f"{c} — {nombre_mat}"
+            if est == "APROBADA":
+                aprobadas_lista.append(entrada)
+            elif est == "REPROBADA":
+                reprobadas_lista.append(entrada)
+            else:
+                faltan_lista.append(entrada)
+
+        aprobadas_n = len(aprobadas_lista)
+        faltan_n = max(0, 5 - aprobadas_n)
+
+        if aprobadas_n >= 5:
+            estado_emoji, estado = "✅", "COMPLETADA"
+        elif aprobadas_n >= 3:
+            estado_emoji, estado = "🟡", "EN PROGRESO"
+        elif aprobadas_n >= 1:
+            estado_emoji, estado = "🟠", "INICIADA"
+        else:
+            estado_emoji, estado = "⚪", "PENDIENTE"
+
+        barra = "█" * aprobadas_n + "░" * (5 - aprobadas_n)
+
+        es_principal = (track == track_principal)
+        if es_principal:
+            partes.append(f"### ⭐ {track} — TU LÍNEA PRINCIPAL")
+        else:
+            partes.append(f"### {track}")
+            partes.append("*(Línea alternativa: si apruebas sus materias cuentan como Elección Libre)*")
+
+        partes.append(f"{estado_emoji} **{aprobadas_n}/5 aprobadas** `{barra}` — {estado}  |  Faltan: {faltan_n}")
+        partes.append("")
+
+        if aprobadas_lista:
+            partes.append("**Aprobadas:**")
+            for item in aprobadas_lista:
+                partes.append(f"- ✅ {item}")
+        else:
+            partes.append("**Aprobadas:** ninguna todavía")
+
+        if reprobadas_lista:
+            partes.append("")
+            partes.append("**Reprobadas (pendientes de recursar):**")
+            for item in reprobadas_lista:
+                partes.append(f"- ❌ {item}")
+
+        if faltan_lista:
+            partes.append("")
+            partes.append("**Pendientes (no cursadas):**")
+            for item in faltan_lista:
+                partes.append(f"- ○ {item}")
+
+        partes.append("")
+        partes.append("---")
+        partes.append("")
+
+    return "\n".join(partes)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  TOOL 10: Consultar historial por periodo
+# ═══════════════════════════════════════════════════════════════════════════
+
+@tool
+def consultar_por_periodo(periodo: str) -> str:
+    """Lista las materias cursadas en un periodo académico específico (ej. '2023-1', '2024-2'). Para '¿qué cargó en 2023-1?', '¿qué llevó el semestre pasado?'."""
+    df = _session_ref.get("historial_df")
+    if df is None or df.empty:
+        return "Sin historial cargado."
+
+    # Búsqueda flexible: coincidencia parcial del periodo
+    mask = df["periodo"].astype(str).str.contains(periodo.strip(), case=False, na=False)
+    df_p = df[mask]
+
+    if df_p.empty:
+        periodos_disponibles = sorted(df["periodo"].dropna().astype(str).unique().tolist())
+        return f"Periodo '{periodo}' no encontrado. Periodos disponibles: {', '.join(periodos_disponibles)}"
+
+    lineas = [f"Periodo '{periodo}': {len(df_p)} materias\n"]
+    cred_total = 0
+    for _, row in df_p.iterrows():
+        cal = row.get("calificacion", "")
+        cred = row.get("creditos", 0)
+        try:
+            cred_total += int(float(cred)) if str(cred) not in ("", "nan") else 0
+        except Exception:
+            pass
+        cal_str = f" | Cal: {cal}" if str(cal) not in ("", "nan", "None") else ""
+        lineas.append(
+            f"  - {row.get('clave','?')} {row.get('nombre','?')} | {row.get('estatus','?')}{cal_str} | {cred}cr"
+        )
+    lineas.append(f"\nTotal créditos del periodo: {cred_total}")
+    return "\n".join(lineas)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  TOOL 11: Co-curriculares (deportiva, cultural, idiomas)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@tool
+def consultar_cocurriculares() -> str:
+    """Materias co-curriculares del alumno: actividades deportivas, culturales e idiomas. Para '¿qué deportivas tiene?', '¿tiene actividad cultural?', '¿cuáles son sus co-curriculares?'."""
+    df = _session_ref.get("historial_df")
+    if df is None or df.empty:
+        return "Sin historial cargado."
+
+    # Lógica idéntica a processor.calcular_requisitos:
+    # AD#### = deportiva | TA#### / AC#### = cultural
+    # SIN_REGISTRAR también cuenta como cumplido (equivalencias/convalidaciones)
+    ESTATUS_VALIDOS = {"APROBADA", "SIN_REGISTRAR"}
+
+    tiene_deportiva = False
+    tiene_cultural = False
+    deportivas = []
+    culturales = []
+    otros_cocurr = []
+
+    for _, row in df.iterrows():
+        clave = str(row.get("clave", "")).upper().strip()
+        estatus = str(row.get("estatus", "")).upper().strip()
+        cal = row.get("calificacion", "")
+        per = row.get("periodo", "")
+        nombre = str(row.get("nombre", ""))
+        cal_str = f" | Cal: {cal}" if str(cal) not in ("", "nan", "None") else ""
+        entry = f"  {clave} {nombre}{cal_str} | {estatus} | P:{per}"
+
+        if clave.startswith("AD"):
+            deportivas.append(entry)
+            if estatus in ESTATUS_VALIDOS:
+                tiene_deportiva = True
+        elif clave.startswith("TA") or clave.startswith("AC"):
+            culturales.append(entry)
+            if estatus in ESTATUS_VALIDOS:
+                tiene_cultural = True
+        elif clave.startswith("LI"):  # inglés
+            otros_cocurr.append(entry)
+
+    # Inglés: usar el flag ya calculado por el parser (más preciso que revisar claves)
+    ingles_ok = _session_ref.get("ingles_completo", False)
+    nivel_ing = _session_ref.get("nivel_ingles_texto", "No disponible")
+
+    lineas = ["CO-CURRICULARES Y REQUISITOS DE EGRESO\n"]
+
+    lineas.append(f"Actividad Deportiva: {'✅ CUMPLIDA' if tiene_deportiva else '❌ PENDIENTE'}")
+    if deportivas:
+        lineas += deportivas
+    else:
+        lineas.append("  (ningún registro con prefijo AD)")
+
+    lineas.append(f"\nActividad Cultural: {'✅ CUMPLIDA' if tiene_cultural else '❌ PENDIENTE'}")
+    if culturales:
+        lineas += culturales
+    else:
+        lineas.append("  (ningún registro con prefijo TA o AC)")
+
+    lineas.append(f"\nInglés: {'✅ COMPLETO' if ingles_ok else '❌ PENDIENTE'} — {nivel_ing}")
+    if otros_cocurr:
+        lineas += otros_cocurr
+
+    return "\n".join(lineas)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  TOOL 12: Créditos por categoría
+# ═══════════════════════════════════════════════════════════════════════════
+
+@tool
+def consultar_creditos_categoria() -> str:
+    """Desglose de créditos acumulados por categoría: BASICA, ELECCION_LIBRE, PRE_ESPECIALIDAD, CO_CURRICULAR. Para '¿cuántos créditos de básicas lleva?', '¿créditos por categoría?', '¿qué le falta para egresar?'."""
+    df = _session_ref.get("historial_df")
+    if df is None or df.empty:
+        return "Sin historial cargado."
+
+    mapa = _cargar_mapa()
+    aprobadas = df[df["estatus"].str.upper() == "APROBADA"]
+
+    creditos_cat: dict = {}
+    requeridos_cat: dict = {}
+
+    for k, v in mapa.items():
+        cat = v.get("categoria", "OTRA")
+        requeridos_cat[cat] = requeridos_cat.get(cat, 0) + v.get("creditos", 0)
+
+    for _, row in aprobadas.iterrows():
+        clave = str(row.get("clave", "")).upper()
+        info = mapa.get(clave, {})
+        cat = info.get("categoria", "OTRA")
+        cred = info.get("creditos", 0) or row.get("creditos", 0)
+        try:
+            cred = int(float(cred))
+        except Exception:
+            cred = 0
+        creditos_cat[cat] = creditos_cat.get(cat, 0) + cred
+
+    cred_total = _session_ref.get("creditos_totales", 404)
+    cred_acum = sum(creditos_cat.values())
+
+    _NOMBRE_CAT = {
+        "BASICA": "Materias Básicas",
+        "ELECCION_LIBRE": "Elección Libre",
+        "PRE_ESPECIALIDAD": "Pre-especialidad",
+        "CO_CURRICULAR": "Co-curriculares (Inglés)",
+        "OTRA": "Otras materias",
+    }
+
+    def _barra(acum, req, ancho=12):
+        if not isinstance(req, int) or req == 0:
+            return "░" * ancho
+        llenos = round(acum / req * ancho)
+        llenos = max(0, min(llenos, ancho))
+        return "█" * llenos + "░" * (ancho - llenos)
+
+    partes = []
+    partes.append("### Progreso hacia la graduación")
+
+    barra_global = _barra(cred_acum, cred_total, ancho=20)
+    try:
+        pct_global = round(cred_acum / cred_total * 100, 1)
+    except Exception:
+        pct_global = "?"
+    partes.append(f"**{cred_acum} / {cred_total} créditos acumulados**")
+    partes.append(f"`{barra_global}` {pct_global}%")
+    faltan_global = cred_total - cred_acum
+    if faltan_global > 0:
+        partes.append(f"Faltan **{faltan_global} créditos** para completar la carrera.")
+    else:
+        partes.append("¡Ya cubriste todos los créditos requeridos!")
+    partes.append("")
+    partes.append("---")
+    partes.append("")
+    partes.append("**Desglose por categoría:**")
+    partes.append("")
+
+    orden_cat = ["BASICA", "PRE_ESPECIALIDAD", "ELECCION_LIBRE", "CO_CURRICULAR", "OTRA"]
+    todas_cats = sorted(set(list(creditos_cat.keys()) + list(requeridos_cat.keys())))
+    cats_ordenadas = [c for c in orden_cat if c in todas_cats] + [c for c in todas_cats if c not in orden_cat]
+
+    for cat in cats_ordenadas:
+        acum = creditos_cat.get(cat, 0)
+        req = requeridos_cat.get(cat, "?")
+        # Omitir categorías irrelevantes: sin requerimiento definido o sin créditos
+        if not isinstance(req, int) or req == 0:
+            continue
+        nombre = _NOMBRE_CAT.get(cat, cat)
+        barra = _barra(acum, req)
+        pct = round(acum / req * 100, 1)
+        faltan = req - acum
+        if acum >= req:
+            emoji = "✅"
+            estado = "Completada"
+        elif acum > 0:
+            emoji = "🟡"
+            estado = "En progreso"
+        else:
+            emoji = "⚪"
+            estado = "Pendiente"
+        partes.append(f"**{nombre}** {emoji} {estado}")
+        partes.append(f"`{barra}` {acum}/{req} cr ({pct}%) — faltan {faltan}")
+        partes.append("")
+
+    return "\n".join(partes)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  TOOL: Buscar por calificación numérica
+# ═══════════════════════════════════════════════════════════════════════════
+
+@tool
+def buscar_por_calificacion(calificacion: str) -> str:
+    """Busca materias del historial donde la calificación coincide con un valor. Útil para '¿hubo alguna materia donde sacó 7?', '¿qué materias tiene con 8?', '¿tiene algún 6?'."""
+    df = _session_ref.get("historial_df")
+    if df is None or df.empty:
+        return "Sin historial cargado."
+
+    cal_buscar = calificacion.strip()
+    # Normalizar: comparar como float si es número
+    try:
+        cal_float = float(cal_buscar)
+        def _coincide(val):
+            try:
+                return float(val) == cal_float
+            except Exception:
+                return str(val).strip() == cal_buscar
+    except ValueError:
+        def _coincide(val):
+            return str(val).strip().upper() == cal_buscar.upper()
+
+    coincidentes = df[df["calificacion"].apply(lambda v: _coincide(v) if str(v) not in ("", "nan", "None") else False)]
+
+    if coincidentes.empty:
+        return f"No hay materias con calificación {cal_buscar} en el historial."
+
+    lineas = [f"**Materias con calificación {cal_buscar}** ({len(coincidentes)} encontradas):\n"]
+    for _, row in coincidentes.iterrows():
+        lineas.append(
+            f"- {row.get('clave','?')} — {row.get('nombre','?')} | "
+            f"{row.get('estatus','?')} | Ciclo {row.get('ciclo','?')} | Periodo: {row.get('periodo','')}"
+        )
+    return "\n".join(lineas)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  Agente
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -498,19 +937,26 @@ ALL_TOOLS = [
     consultar_candidatas,
     comparar_carga,
     consultar_cargas,
+    consultar_eleccion_libre,
+    consultar_preespecialidades,
+    consultar_por_periodo,
+    consultar_cocurriculares,
+    consultar_creditos_categoria,
+    buscar_por_calificacion,
 ]
 
 
 def crear_agente(api_key: str = "", modelo: str = ""):
-    key = api_key or settings.GEMINI_API_KEY
+    key = api_key or settings.OPENROUTER_API_KEY
     if not key:
         return None
 
-    llm = ChatGoogleGenerativeAI(
-        model=modelo or "gemini-2.5-flash",
-        google_api_key=key,
+    llm = ChatOpenAI(
+        model=modelo or "deepseek/deepseek-chat-v3-0324",
+        openai_api_key=key,
+        openai_api_base="https://openrouter.ai/api/v1",
         temperature=0.1,
-        max_output_tokens=2048,
+        max_tokens=1024,
     )
 
     return create_react_agent(model=llm, tools=ALL_TOOLS, prompt=SYSTEM_PROMPT)
@@ -592,6 +1038,10 @@ _SINONIMOS = {
     "promedio": ["promedio", "calificacion general", "nota", "average"],
     "credito": ["credito", "creditos"],
     "semestre": ["semestre", "semestres", "ciclo", "ciclos", "periodo"],
+    "calificacion": ["calificacion", "calificaciones", "nota", "notas", "como le fue", "que saco", "cuanto saco"],
+    "eleccion_libre": ["eleccion libre", "el ciclo", "materias libres", "elecciones libres", "libre"],
+    "preespecialidad": ["preespecialidad", "pre especialidad", "pre-especialidad", "especialidad cursada", "linea de especialidad"],
+    "cocurricular": ["cocurricular", "co-curricular", "actividad adicional", "actividades adicionales"],
 }
 
 _REGLAS_LOCALES = [
@@ -862,6 +1312,47 @@ def _consulta_datos_local(pregunta: str) -> Optional[str]:
             restantes = max(0, 8 - int(sem)) if str(sem).isdigit() else "?"
             return f"**Semestre actual: {sem} de 8** — le faltan {restantes} semestres"
 
+    # "que calificacion saco en X?" / "como le fue en X?" / "nota de X"
+    _cal_signals = ["calificacion", "calificaciones", "nota", "notas", "como le fue", "como salio",
+                    "cuanto saco", "que saco", "cuanto le fue", "que calificacion"]
+
+    # "¿hay alguna materia donde sacó 7?" — búsqueda por VALOR numérico
+    import re as _re
+    _num_match = _re.search(r'\b(saco|obtuvo|tiene|calificacion de|nota de|con un|con nota)\s*([0-9]+(?:\.[0-9]+)?)\b', q)
+    if not _num_match:
+        _num_match = _re.search(r'\b([0-9]+(?:\.[0-9]+)?)\s*(de calificacion|de nota|en calificacion)\b', q)
+    if _num_match:
+        # Identificar el grupo que tiene el número
+        grupos = [g for g in _num_match.groups() if g and _re.match(r'^[0-9]', g)]
+        if grupos:
+            cal_val = grupos[0]
+            return buscar_por_calificacion.invoke({"calificacion": cal_val})
+
+    if any(s in q for s in _cal_signals):
+        # Extraer el nombre/clave de la materia de la pregunta
+        _stopwords_cal = {"que", "cual", "cuanto", "como", "le", "fue", "saco", "en", "la", "el",
+                          "calificacion", "nota", "salio", "de", "materia", "clase", "obtuvo", "tiene",
+                          "alumno", "estudiante"}
+        palabras = [p.strip("?,.'\"") for p in pregunta.split() if _norm(p.strip("?,.'\"")) not in _stopwords_cal and len(p.strip("?,.'\"")) > 2]
+        if palabras:
+            consulta = " ".join(palabras)
+            matches = _buscar_en_mapa(consulta)
+            if matches:
+                lineas = []
+                for clave, info in matches[:2]:
+                    hist = df[df["clave"].str.upper() == clave]
+                    if hist.empty:
+                        lineas.append(f"{clave} {info.get('nombre','')}: sin registros en el historial.")
+                        continue
+                    for _, row in hist.iterrows():
+                        cal = row.get("calificacion", "")
+                        est = row.get("estatus", "")
+                        per = row.get("periodo", "")
+                        cal_str = str(cal) if str(cal) not in ("", "nan", "None") else "Sin calificación"
+                        lineas.append(f"{clave} {info.get('nombre','')}: **{cal_str}** | {est} | Periodo: {per}")
+                if lineas:
+                    return "\n".join(lineas)
+
     return None
 
 
@@ -873,7 +1364,13 @@ def respuesta_local(pregunta: str) -> Optional[str]:
     # Preguntas complejas que SIEMPRE deben ir al LLM (requieren razonamiento)
     _llm_only = ["como va", "esta en riesgo", "diagnostico",
                  "que deberia cargar", "candidatas", "criticas",
-                 "cuanto le falta", "cuantos semestres"]
+                 "cuanto le falta", "cuantos semestres",
+                 # Preguntas sobre DATOS del estudiante (no sobre la regla)
+                 "ya tiene", "tiene cubierta", "ya cumple", "cumple con",
+                 "lleva la actividad", "tiene la actividad",
+                 "tiene deportiva", "tiene cultural",
+                 "cuantas eleccion", "progreso preesp",
+                 "que periodo", "que cargo en", "que llevo en"]
     for signal in _llm_only:
         if _norm(signal) in q:
             return None
@@ -969,6 +1466,24 @@ def simular_reprobacion(claves: List[str]) -> str:
     return header + "\n".join(resultados) + footer
 
 
+import re as _re
+_TOOL_CALL_PAT = _re.compile(r'^\s*\{\s*"name"\s*:', _re.MULTILINE)
+
+
+def _es_mensaje_tool_call(msg) -> bool:
+    """True si el mensaje es un paso intermedio de tool-calling (no respuesta final)."""
+    # 1. Tiene tool_calls estructurados — mensaje de invocación, no de respuesta
+    if getattr(msg, 'tool_calls', None):
+        return True
+    # 2. El contenido es JSON crudo de tool call (DeepSeek a veces lo embebe en content)
+    content = getattr(msg, 'content', '') or ''
+    if isinstance(content, str):
+        stripped = content.strip()
+        if _TOOL_CALL_PAT.search(stripped) and '"parameters"' in stripped:
+            return True
+    return False
+
+
 def ejecutar_consulta(agent, pregunta: str, chat_history: List = None) -> str:
     import time
     if chat_history is None:
@@ -985,7 +1500,7 @@ def ejecutar_consulta(agent, pregunta: str, chat_history: List = None) -> str:
         try:
             resultado = agent.invoke({"messages": messages})
             for msg in reversed(resultado.get("messages", [])):
-                if isinstance(msg, AIMessage) and msg.content:
+                if isinstance(msg, AIMessage) and msg.content and not _es_mensaje_tool_call(msg):
                     return _extraer_texto(msg.content)
             return "No pude procesar tu pregunta."
         except Exception as e:
@@ -1000,23 +1515,31 @@ def ejecutar_consulta(agent, pregunta: str, chat_history: List = None) -> str:
 
 
 def ejecutar_consulta_stream(agent, pregunta: str, chat_history: List = None) -> Generator[str, None, None]:
+    import time
     if chat_history is None:
         chat_history = []
 
     messages = _trim_history(chat_history) + [HumanMessage(content=pregunta)]
 
-    try:
-        got_response = False
-        for event in agent.stream({"messages": messages}, stream_mode="messages"):
-            msg, _ = event
-            if isinstance(msg, AIMessage) and msg.content:
-                got_response = True
-                yield _extraer_texto(msg.content)
-        if not got_response:
-            yield "No pude procesar tu pregunta."
-    except Exception as e:
-        err = str(e)
-        if "429" in err or "RESOURCE_EXHAUSTED" in err:
-            yield "Servicio de IA saturado. Espera unos segundos."
-        else:
+    for intento in range(3):
+        try:
+            got_response = False
+            for event in agent.stream({"messages": messages}, stream_mode="messages"):
+                msg, _ = event
+                # Saltar mensajes intermedios de tool-calling
+                if isinstance(msg, AIMessage) and msg.content and not _es_mensaje_tool_call(msg):
+                    got_response = True
+                    yield _extraer_texto(msg.content)
+            if not got_response:
+                yield "No pude procesar tu pregunta."
+            return
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                if intento < 2:
+                    time.sleep(10 * (intento + 1))
+                    continue
+                yield "Servicio de IA saturado. Espera unos segundos e intenta de nuevo."
+                return
             yield f"Error: {err}"
+            return

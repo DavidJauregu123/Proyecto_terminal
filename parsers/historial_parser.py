@@ -71,6 +71,8 @@ class HistorialParser:
         self.nivel_ingles_texto: str = ""     # Texto original del PDF
         self.codigos_ingles_aprobados: set = set()  # Códigos auto-aprobados por inglés
         self.ingles_completo: bool = False    # True solo si llegó a Tópicos 2
+        self.matricula: str = ""              # Matrícula del estudiante (si aparece en el PDF)
+        self.nombre: str = ""                 # Nombre del estudiante (si aparece en el PDF)
 
     def parse_historial(self, ruta_pdf: str) -> Dict[str, InfoMateria]:
         """
@@ -86,7 +88,35 @@ class HistorialParser:
         self.materias = self._extraer_materias(texto_completo)
         self._extraer_creditos(texto_completo)
         self._extraer_nivel_ingles(texto_completo)
+        self._extraer_identidad(texto_completo)
         return self.materias
+
+    def _extraer_identidad(self, texto: str):
+        """Extrae matrícula y nombre del encabezado del historial académico.
+
+        El historial de UniCaribe no etiqueta la matrícula explícitamente.
+        El encabezado tiene el formato:
+            Ingeniería en Datos e Inteligencia   230300822 DZIB DE LA ROSA / ADRIANA
+        Es decir: número de 8-10 dígitos seguido del nombre en mayúsculas con slash.
+        """
+        # Formato historial: número (matricula) + APELLIDO / NOMBRE en mayúsculas
+        m = re.search(
+            r'(\d{8,10})\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]+/\s*[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]+)',
+            texto
+        )
+        if m:
+            self.matricula = m.group(1).strip()
+            nombre_raw = m.group(2).strip()
+            partes = nombre_raw.split("/")
+            apellido = partes[0].strip().title()
+            nombre_p = partes[1].strip().title() if len(partes) > 1 else ""
+            self.nombre = f"{nombre_p} {apellido}".strip()
+            return
+
+        # Fallback: etiqueta explícita "Matrícula:" (otros formatos de documento)
+        m = re.search(r'Matr[ií]cula[:\s]+(\d{5,12})', texto, re.IGNORECASE)
+        if m:
+            self.matricula = m.group(1).strip()
 
     @staticmethod
     def _nfc(s: str) -> str:
