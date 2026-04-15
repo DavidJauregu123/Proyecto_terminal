@@ -22,7 +22,10 @@ El sistema analiza el PDF del historial académico (y opcionalmente el kardex) d
 ```
 proyecto terminal/
 ├── agents/
-│   └── sistema_experto_seriacion.py   ← Núcleo del sistema experto
+│   ├── sistema_experto_seriacion.py   ← Núcleo del sistema experto
+│   ├── agente_asesor.py               ← Agente conversacional LangChain (tools + LLM)
+│   ├── knowledge_base.py              ← Reglas locales y base de conocimiento
+│   └── OfertaAcademica/               ← (WIP) Cruce con oferta del período
 ├── dashboard/
 │   └── app.py                         ← Aplicación Streamlit (UI)
 ├── parsers/
@@ -214,8 +217,10 @@ Solo las materias con `categoria == "BASICA"` y cuya clave no empiece con `"PID"
 | Pestaña | Contenido |
 |---|---|
 | Historia Académica | Resumen, progreso por ciclo, EL, pre-especialidades |
-| Sistema Experto | Materias candidatas + explicación de la lógica |
+| Sistema Experto | Materias candidatas + tabla HTML con prioridades, colores y razones |
 | Mapa Curricular | Tabla con avance por semestre + tabla de verificación |
+| Agente Conversacional | Chat interactivo con el agente LangChain |
+| Disponibilidad Horaria | Editor de disponibilidad + pills de días con st.pills |
 | Pruebas | Sección de debugging |
 
 ### Flujo de carga de documentos (sidebar)
@@ -226,7 +231,25 @@ Solo las materias con `categoria == "BASICA"` y cuya clave no empiece con `"PID"
 ### Tab Sistema Experto
 
 - El sistema experto se ejecuta automáticamente al entrar a la pestaña (no requiere botón), condicionado a que haya historial cargado.
-- Muestra: métricas (semestre, candidatas, analizadas), tabla de candidatas, y debajo un expander colapsado con la explicación en texto plano (sin emojis) de por qué se eligieron esas materias.
+- Muestra: métricas (semestre, candidatas, analizadas), tabla HTML con candidatas agrupadas por nivel de prioridad.
+- La tabla incluye columnas: Clave (`monospace`), Nombre, Semestre, Créditos, Categoría, Prerequisitos (`monospace`), Razón.
+- Cada grupo de prioridad tiene su propio header coloreado y filas con colores alternos (color del nivel / blanco).
+- Se usa `border-right: 2px solid #ccc` en celdas para separación visual.
+
+### Sistema de Prioridades (6 niveles)
+
+| Nivel | Nombre | Color | Condición |
+|---|---|---|---|
+| P1 | Prerequisito faltante retroactivo | Rojo oscuro `#b71c1c` | Materia que ya se adelantó pero le falta un prereq |
+| P2 | Materias reprobadas | Rojo `#d32f2f` | Materias con estatus REPROBADA |
+| P3 | Pendientes de ciclos anteriores | Naranja `#ef6c00` | `ciclo < semestre_objetivo` |
+| P4 | Ciclo actual | Azul `#1565c0` | `ciclo == semestre_objetivo` |
+| P5 | Elección libre | Morado `#6a1b9a` | `categoria == ELECCION_LIBRE` |
+| P6 | Co-curriculares pendientes | Verde teal `#00695c` | Inglés, actividades |
+
+**Cálculo de ciclo anual:** `ciclo_anual = (ciclo + 1) // 2` — convierte el semestre (1-8) al año académico (1-4).
+
+**Razón de cada materia:** la columna Razón en la tabla explica con texto por qué la materia quedó en ese nivel, ej: *"Pendiente del ciclo 2 (semestre 3) — cerrar ciclo para avanzar"*.
 
 ---
 
@@ -324,7 +347,67 @@ for clave, m in mapa.items():
 
 ---
 
-## 11. Puntos de extensión conocidos
+---
+
+## 11. Agente Conversacional
+
+### Arquitectura
+
+- **Framework**: LangChain ReAct agent + OpenRouter (modelo configurable, default `google/gemini-2.0-flash-exp`)
+- **Archivo principal**: `agents/agente_asesor.py`
+- **Integración con Streamlit**: chat en tab independiente; usa `st.session_state` para compartir el historial del alumno con el agente.
+
+### Sesión compartida (`_session_ref`)
+
+El agente no tiene acceso directo a `st.session_state`. En su lugar, el dashboard llama a `set_session_ref(st.session_state)` antes de crear el agente, y todas las tools leen de `_session_ref` (un dict).
+
+**Claves relevantes que el agente lee:**
+- `historial_df` — DataFrame con todas las materias del alumno
+- `resultado_experto` — resultado completo del sistema experto (candidatas, semestre, etc.)
+- `datos_estudiante` — objeto `DatosEstudiante` (promedio, matrícula, situación)
+- `creditos_totales` / `creditos_acumulados`
+
+### Tools disponibles (13)
+
+| Tool | Descripción |
+|---|---|
+| `resumen_estudiante` | Datos generales: matrícula, promedio, situación, semestre |
+| `diagnostico_academico` | Estado completo: aprobadas, reprobadas, en_curso, alertas |
+| `buscar_materia` | Busca por clave o nombre; muestra prereqs, dependientes y cascada |
+| `consultar_historial` | Lista materias filtradas por estatus (APROBADA/REPROBADA/EN_CURSO) |
+| `consultar_candidatas` | Materias candidatas del sistema experto con prioridades |
+| `comparar_carga` | Compara carga actual vs recomendada |
+| `consultar_cargas` | Resumen de créditos en curso |
+| `consultar_eleccion_libre` | Estado de Elección Libre por ciclo anual |
+| `consultar_preespecialidades` | Progreso en cada línea de pre-especialidad con barras y bullets |
+| `consultar_por_periodo` | Materias de un período específico |
+| `consultar_cocurriculares` | Estado de inglés y actividades extra-curriculares |
+| `consultar_creditos_categoria` | Progreso de créditos por categoría con barras y emojis |
+| `buscar_por_calificacion` | Busca materias donde la calificación coincide exactamente con un valor |
+
+### Respuesta local (sin LLM)
+
+Antes de invocar el LLM, `respuesta_local()` intenta responder directamente con reglas locales (costo 0, instantáneo):
+- Preguntas de datos directas: promedio, créditos, semestre actual, materias en curso, reprobadas
+- Simulaciones "¿qué pasa si reprueba X?"
+- Búsqueda por calificación numérica (ej: "¿tiene alguna materia donde sacó 7?")
+- Preguntas de reglas del reglamento (desde `_REGLAS_LOCALES` en `knowledge_base.py`)
+
+Si `respuesta_local()` retorna `None`, la pregunta pasa al agente LangChain.
+
+### Salida formateada en Markdown
+
+Las tools `consultar_preespecialidades` y `consultar_creditos_categoria` retornan Markdown con:
+- Headers `###` por sección
+- Barras de progreso con bloques `█░`
+- Listas de bullets con emojis de estado (✅ / 🟡 / ⚪ / ❌)
+- Separadores `---`
+
+El chat las renderiza vía `st.markdown()`.
+
+---
+
+## 12. Puntos de extensión conocidos
 
 - **Soporte multi-plan:** el código ya parametriza el plan (`"2021ID"`), pero solo existe un mapa curricular cargado. Agregar un nuevo plan requiere generar su JSON correspondiente.
 - **Notificaciones de alerta académica:** el campo `situacion` del kardex (REGULAR / IRREGULAR / BAJA) se muestra pero no genera lógica adicional todavía.
@@ -333,7 +416,7 @@ for clave, m in mapa.items():
 
 ---
 
-## 12. Preguntas de análisis para el equipo
+## 13. Preguntas de análisis para el equipo
 
 Las siguientes preguntas están pensadas para guiar la revisión del proyecto, identificar áreas de mejora y orientar el trabajo de los colaboradores.
 

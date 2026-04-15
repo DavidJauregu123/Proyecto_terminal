@@ -26,9 +26,10 @@
 - **Plotly (≥5.17.0)**: Visualización de datos con gráficos interactivos (donuts, barras)
 
 #### Inteligencia Artificial y Agentes:
-- **LangChain (≥0.1.0)**: Framework para desarrollo de aplicaciones con LLMs
-- **Google Generative AI (≥0.3.0)**: Integración con Gemini para agente conversacional
-- **LangGraph**: Orquestación de flujos de trabajo con múltiples agentes
+- **LangChain (≥0.1.0)**: Framework para desarrollo de aplicaciones con LLMs y orquestación de agentes ReAct
+- **OpenRouter API**: Proveedor de acceso a múltiples LLMs; modelo activo: `google/gemini-2.0-flash-exp` (configurable en `settings.py`)
+- **Google Generative AI (≥0.3.0)**: Integración alternativa con Gemini (respaldo)
+- **LangGraph**: Orquestación de flujos de trabajo con múltiples agentes (uso futuro)
 
 #### Gestión de Configuración:
 - **python-dotenv (v1.0.0)**: Manejo de variables de entorno y configuración sensible
@@ -168,6 +169,19 @@ El sistema debe verificar cumplimiento de:
 - El sistema debe permitir navegación entre secciones del reporte
 - El sistema debe mostrar información de forma clara y organizada
 - El sistema debe usar código de colores para facilitar interpretación
+
+**RF10 - Agente Conversacional**
+- El sistema debe proporcionar un chat en lenguaje natural para consultar datos del alumno
+- El agente debe responder sin LLM (costo cero) preguntas de datos simples vía reglas locales
+- El agente debe invocar tools de LangChain para preguntas complejas que requieran razonamiento
+- Las respuestas deben usar formato Markdown (headers, bullets, barras de progreso)
+- El agente debe detectar correctamente la calificación numérica en preguntas como «sacó 7»
+- El historial del chat debe persistir durante la sesión
+
+**RF11 - Disponibilidad Horaria**
+- El sistema debe permitir seleccionar días disponibles mediante componente interactivo (st.pills)
+- La selección de días debe sincronizarse bidireccionalmente con el editor de tabla (data_editor)
+- Los cambios en pills deben actualizarse sin recargar la página completa (st.fragment)
 
 **RF09 - Configuración**
 - El sistema debe permitir configuración mediante variables de entorno
@@ -543,7 +557,7 @@ streamlit run dashboard/app.py
 Proyecto_terminal/
 ├── config/                      # Configuración centralizada
 │   ├── __init__.py
-│   └── settings.py              # Variables de entorno
+│   └── settings.py              # Variables de entorno (API keys, modelo LLM)
 │
 ├── db/                          # Capa de base de datos
 │   ├── __init__.py
@@ -560,9 +574,16 @@ Proyecto_terminal/
 │   ├── local_database.py        # DatabaseService
 │   └── supabase_service.py      # Servicio Supabase (legacy)
 │
+├── agents/                      # Sistema experto y agente conversacional
+│   ├── __init__.py
+│   ├── sistema_experto_seriacion.py  # Motor de seriación (6 niveles de prioridad)
+│   ├── agente_asesor.py         # Agente LangChain (13 tools, routing local)
+│   ├── knowledge_base.py        # Reglas locales + base de conocimiento
+│   └── OfertaAcademica/         # (WIP) Cruce con oferta del período
+│
 ├── dashboard/                   # Interfaz de usuario
 │   ├── __init__.py
-│   └── app.py                   # Dashboard Streamlit
+│   └── app.py                   # Dashboard Streamlit (6 pestañas)
 │
 ├── scripts/                     # Scripts de utilidad
 │   ├── __init__.py
@@ -571,18 +592,19 @@ Proyecto_terminal/
 │   └── generar_mapa_curricular.py  # Generador de mapa
 │
 ├── data/                        # Datos estáticos
-│   ├── mapa_curricular_2021ID.json  # Mapa curricular oficial
-│   └── mapa_curricular_ejemplo.json # Ejemplo de mapa
-│
-├── agents/                      # Agentes conversacionales (futuro)
-│   └── __init__.py
+│   ├── mapa_curricular_2021ID_real_completo.json  # Mapa curricular oficial
+│   ├── mapeo_especialidades_2021ID.json           # Claves por especialidad
+│   ├── mapeo_cadenas_2021ID.json                  # Cadenas de seriación
+│   ├── equivalencias_legacy_2021ID.json           # Equivalencias plan antiguo
+│   └── electivas_clasificadas.json               # EL clasificadas por tipo
 │
 ├── requirements.txt             # Dependencias Python
 ├── .env.example                 # Plantilla de variables de entorno
 ├── README.md                    # Documentación general
 ├── QUICKSTART.md                # Guía de inicio rápido
-├── COMANDOS_INICIO.txt          # Comandos útiles
-└── ejemplo_uso.py               # Ejemplo de uso programático
+├── CONTEXTO.md                  # Arquitectura y decisiones técnicas
+├── AGENTE_CONVERSACIONAL.md     # Documentación del agente
+└── COMANDOS_INICIO.txt          # Comandos útiles
 ```
 
 #### 5.3.7 Manejo de Errores y Validaciones
@@ -640,10 +662,16 @@ except Exception as e:
 ✅ Modelos de base de datos (100%)
 ✅ Servicio de base de datos (100%)
 ✅ Procesador académico (100%)
-✅ Dashboard interactivo (100%)
+✅ Dashboard interactivo — 6 pestañas (100%)
 ✅ Sistema de alertas (100%)
 ✅ Gestión de requisitos adicionales (100%)
-⏳ Agentes conversacionales con Gemini (20%)
+✅ Sistema experto de seriación con 6 niveles de prioridad (100%)
+✅ Tabla HTML de candidatas con colores, borders y razón por materia (100%)
+✅ Agente conversacional LangChain con 13 tools (95%)
+✅ Routing local sin LLM para preguntas simples (100%)
+✅ Búsqueda por calificación numérica en historial (100%)
+✅ Disponibilidad horaria con st.pills + data_editor sincronizados (100%)
+⏳ Cruce con oferta académica real del período (10%)
 ⏳ Sistema de recomendación de horarios (0%)
 
 ---
