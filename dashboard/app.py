@@ -943,25 +943,8 @@ def _init_agente():
         except Exception:
             pass
 
-    # Inyectar session_state al agente
-    session_dict = {}
-    for key in [
-        "datos_estudiante", "resultado_experto",
-        "creditos_totales", "creditos_acumulados",
-        "nivel_ingles_texto", "nivel_ingles_aprobado", "ingles_completo",
-        "codigos_ingles_aprobados", "cargas_generadas",
-        "especialidad_forzada",
-        "eleccion_libre_info", "preespecialidades_info",
-        "alertas_academicas",
-    ]:
-        if key in st.session_state:
-            session_dict[key] = st.session_state[key]
-    # El agente siempre ve el historial en modo simulación (sin EN_CURSO)
-    if "historial_calculo" in st.session_state:
-        session_dict["historial_df"] = st.session_state["historial_calculo"]
-    elif "historial_df" in st.session_state:
-        session_dict["historial_df"] = st.session_state["historial_df"]
-    set_session_state(session_dict)
+    # Inyectar session_state al agente (misma logica que _sincronizar_session_agente)
+    _sincronizar_session_agente()
 
 
 
@@ -1000,9 +983,208 @@ def _detectar_tab_en_respuesta(texto: str):
     return None
 
 
+def _sincronizar_session_agente():
+    """Fuerza la sincronizacion del session_state al agente.
+    Se llama antes de cada consulta para garantizar que el agente ve los datos mas recientes."""
+    session_dict = {}
+    for key in [
+        "datos_estudiante", "resultado_experto",
+        "creditos_totales", "creditos_acumulados",
+        "nivel_ingles_texto", "nivel_ingles_aprobado", "ingles_completo",
+        "codigos_ingles_aprobados", "cargas_generadas",
+        "especialidad_forzada",
+        "eleccion_libre_info", "preespecialidades_info",
+        "alertas_academicas",
+    ]:
+        if key in st.session_state:
+            session_dict[key] = st.session_state[key]
+    # Historial: preferir historial_calculo (canonico) sobre historial_df (raw)
+    if "historial_calculo" in st.session_state:
+        session_dict["historial_calculo"] = st.session_state["historial_calculo"]
+        session_dict["historial_df"] = st.session_state["historial_calculo"]
+    elif "historial_df" in st.session_state:
+        session_dict["historial_df"] = st.session_state["historial_df"]
+    # Guardar tambien historial_df raw por separado (para metricas historicas de reprobacion)
+    if "historial_df" in st.session_state and "historial_calculo" in st.session_state:
+        # Sobrescribir con el raw real para que _consulta_datos_local pueda distinguir
+        session_dict["historial_df"] = st.session_state["historial_df"]
+    set_session_state(session_dict)
+    return session_dict
+
+
+def _ejecutar_sistema_experto_on_demand() -> bool:
+    """Ejecuta el sistema experto si hay datos del estudiante pero no resultado_experto.
+    Retorna True si resultado_experto esta disponible al terminar, False si no."""
+    # Si ya existe el resultado, no hacer nada
+    if st.session_state.get("resultado_experto"):
+        return True
+
+    datos = st.session_state.get("datos_estudiante")
+    if datos is None:
+        return False
+
+    historial_df = st.session_state.get("historial_df")
+    if historial_df is None or historial_df.empty:
+        return False
+
+    try:
+        # Preparar historial (mismo codigo que la pestana del sistema experto)
+        plan_estudios = str(getattr(datos, "plan_estudios", "2021ID") or "2021ID").strip()
+
+        historial_aprobado = []
+        for _, row in historial_df.iterrows():
+            clave = str(row.get("clave", "")).strip().upper()
+            if not clave:
+                continue
+            estatus = str(row.get("estatus", "")).upper()
+            ciclo = row.get("ciclo")
+            try:
+                ciclo = int(ciclo) if pd.notna(ciclo) else 1
+            except Exception:
+                ciclo = 1
+            cal = row.get("calificacion", 0.0)
+            cred = row.get("creditos", 0)
+            try:
+                cal = float(cal) if pd.notna(cal) else 0.0
+            except Exception:
+                cal = 0.0
+            try:
+                cred = int(float(cred)) if pd.notna(cred) else 0
+            except Exception:
+                cred = 0
+            historial_aprobado.append({
+                "clave": clave,
+                "ciclo": ciclo,
+                "estatus": estatus,
+                "calificacion": cal,
+                "creditos": cred,
+                "nombre": str(row.get("nombre", "")).strip(),
+                "periodo": str(row.get("periodo", "")).strip(),
+            })
+
+        # Cargar mapa curricular
+        mapa_path = Path(__file__).parent.parent / "data" / f"mapa_curricular_{plan_estudios}_real_completo.json"
+        mapa_curricular = None
+        if mapa_path.exists():
+            with open(mapa_path, "r", encoding="utf-8") as f:
+                datos_mapa = json.load(f)
+                if isinstance(datos_mapa, dict):
+                    mapa_curricular = []
+                    for clave, info in datos_mapa.items():
+                        if isinstance(info, dict):
+                            info["clave"] = str(clave).strip().upper()
+                            mapa_curricular.append(info)
+
+        # Filtrar EN_CURSO para modo simulacion
+        historial_para_experto = [
+            h for h in historial_aprobado
+            if h["estatus"] not in ("EN_CURSO", "RECURSANDO")
+        ]
+
+        especialidad_forzada = st.session_state.get("especialidad_forzada", None)
+        resultado = ejecutar_sistema_experto(
+            historial_academico=historial_para_experto,
+            mapa_curricular=mapa_curricular,
+            plan_estudios=plan_estudios,
+            especialidad_forzada=especialidad_forzada,
+            en_curso_para_especialidad=[],
+        )
+
+        st.session_state.resultado_experto = resultado
+        return True
+    except Exception as e:
+        print(f"[chat] Error ejecutando sistema experto on-demand: {e}")
+        return False
+
+
+def _esperar_datos_estudiante(max_espera_seg: float = 6.0, intervalo: float = 0.4) -> str:
+    """Espera hasta max_espera_seg a que los datos del estudiante esten procesados.
+    Retorna:
+    - 'ok' si datos_estudiante Y resultado_experto estan listos
+    - 'parcial' si datos_estudiante esta pero resultado_experto no (sistema experto tarda)
+    - 'sin_datos' si no hay datos del estudiante
+    """
+    import time
+    elapsed = 0.0
+    while elapsed < max_espera_seg:
+        _sincronizar_session_agente()
+        datos = st.session_state.get("datos_estudiante")
+        resultado = st.session_state.get("resultado_experto")
+        if datos is not None and resultado:
+            return "ok"
+        time.sleep(intervalo)
+        elapsed += intervalo
+
+    # Agoto el tiempo — ver que tenemos
+    datos = st.session_state.get("datos_estudiante")
+    resultado = st.session_state.get("resultado_experto")
+    if datos is None:
+        return "sin_datos"
+    if not resultado:
+        return "parcial"
+    return "ok"
+
+
+def _pregunta_necesita_sistema_experto(texto: str) -> bool:
+    """Detecta si la pregunta requiere resultado_experto (candidatas, priorizacion, carga)."""
+    import unicodedata as _u
+    q = _u.normalize("NFD", texto.lower()).encode("ascii", "ignore").decode()
+    keywords = [
+        "cargar", "priorizar", "prioridad", "candidatas", "candidata",
+        "recomienda", "recomendar", "recomendadas", "recomendada",
+        "proximo semestre", "siguiente semestre",
+        "que materias", "que debe", "que toca",
+        "urgente", "critico", "por donde empezar",
+        "comparar carga", "comparacion",
+    ]
+    return any(k in q for k in keywords)
+
+
 def _enviar_mensaje_chat(texto: str):
     """Procesa un mensaje en el chat del agente."""
+    # Sincronizar session_state inicialmente
+    _sincronizar_session_agente()
     st.session_state.chat_messages.append({"role": "user", "content": texto})
+
+    # Si la pregunta necesita datos y faltan, esperar con reintentos
+    necesita_experto = _pregunta_necesita_sistema_experto(texto)
+    datos = st.session_state.get("datos_estudiante")
+    resultado = st.session_state.get("resultado_experto")
+
+    # Sin datos del estudiante → mensaje claro
+    if datos is None:
+        # Dar una ultima chance: esperar unos segundos por si apenas esta procesando
+        with st.spinner("Buscando datos del estudiante..."):
+            estado = _esperar_datos_estudiante(max_espera_seg=4.0)
+        if estado == "sin_datos":
+            st.session_state.chat_messages.append({
+                "role": "assistant",
+                "content": (
+                    "No hay datos del estudiante cargados. "
+                    "Sube el Historial Academico y el Kardex en el panel lateral izquierdo "
+                    "y espera a que termine el procesamiento (veras un mensaje de exito). "
+                    "Despues vuelve a preguntar."
+                ),
+            })
+            return
+        _sincronizar_session_agente()
+
+    # Si la pregunta necesita sistema experto y no esta calculado, ejecutarlo on-demand
+    if necesita_experto and not st.session_state.get("resultado_experto"):
+        with st.spinner("Ejecutando sistema experto..."):
+            ok = _ejecutar_sistema_experto_on_demand()
+        if not ok:
+            st.session_state.chat_messages.append({
+                "role": "assistant",
+                "content": (
+                    "No se pudo ejecutar el sistema experto. "
+                    "Verifica que el Historial Academico este procesado correctamente. "
+                    "Puedes ir a la pestana 'Materias Candidatas para Cargar' para diagnosticar."
+                ),
+            })
+            return
+        # Re-sincronizar con el resultado_experto recien calculado
+        _sincronizar_session_agente()
 
     # Intentar respuesta local primero (sin API) para chips registrados
     _local_tool = _CHIP_LOCAL.get(texto)

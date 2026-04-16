@@ -10,6 +10,8 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
+import pandas as pd
+
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
@@ -92,12 +94,188 @@ def set_session_state(d: Dict[str, Any]):
 #  TOOL 1: Resumen del estudiante con evaluación de regularidad
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  HELPERS DE ANALISIS — funciones compartidas entre tools
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _analizar_tendencia_promedio(df) -> dict:
+    """Analiza la tendencia del promedio en los ultimos periodos.
+    Retorna: {tendencia, ultimos_promedios, diff}"""
+    if df is None or df.empty or "calificacion" not in df.columns:
+        return {"tendencia": "sin datos", "ultimos_promedios": [], "diff": 0.0}
+
+    try:
+        df2 = df.copy()
+        df2["calificacion"] = pd.to_numeric(df2["calificacion"], errors="coerce")
+        # Solo calificadas con numero
+        df2 = df2[df2["calificacion"].notna() & (df2["calificacion"] > 0)]
+        df2 = df2[df2["estatus"].str.upper().isin(["APROBADA", "REPROBADA"])]
+        if df2.empty:
+            return {"tendencia": "sin datos", "ultimos_promedios": [], "diff": 0.0}
+
+        # Promedio por periodo
+        promedios = df2.groupby("periodo")["calificacion"].mean().sort_index()
+        if len(promedios) < 2:
+            return {"tendencia": "insuficiente", "ultimos_promedios": list(promedios.items()), "diff": 0.0}
+
+        ultimos = promedios.tail(3)
+        lista = [(str(p), round(float(v), 2)) for p, v in ultimos.items()]
+
+        # Diferencia entre el ultimo y el anterior
+        vals = ultimos.values
+        diff = float(vals[-1] - vals[0]) if len(vals) >= 2 else 0.0
+
+        if diff >= 0.3:
+            tendencia = "subiendo"
+        elif diff <= -0.3:
+            tendencia = "bajando"
+        else:
+            tendencia = "estable"
+
+        return {"tendencia": tendencia, "ultimos_promedios": lista, "diff": round(diff, 2)}
+    except Exception:
+        return {"tendencia": "sin datos", "ultimos_promedios": [], "diff": 0.0}
+
+
+def _proyectar_egreso(df, cred_acum: int, cred_total: int) -> dict:
+    """Proyecta cuantos periodos le faltan al alumno para egresar con su ritmo actual.
+    Retorna: {periodos_restantes, creditos_por_periodo, fecha_estimada}"""
+    if df is None or df.empty or cred_acum >= cred_total:
+        return {"periodos_restantes": 0, "creditos_por_periodo": 0, "ok": False}
+
+    try:
+        aprobadas = df[df["estatus"].str.upper() == "APROBADA"]
+        if aprobadas.empty or "periodo" not in aprobadas.columns:
+            return {"periodos_restantes": 0, "creditos_por_periodo": 0, "ok": False}
+
+        periodos_activos = aprobadas["periodo"].nunique()
+        if periodos_activos == 0:
+            return {"periodos_restantes": 0, "creditos_por_periodo": 0, "ok": False}
+
+        cred_por_periodo = cred_acum / periodos_activos
+        cred_falt = cred_total - cred_acum
+        periodos_restantes = cred_falt / cred_por_periodo if cred_por_periodo > 0 else 0
+
+        return {
+            "periodos_restantes": round(periodos_restantes, 1),
+            "creditos_por_periodo": round(cred_por_periodo, 1),
+            "ok": True,
+        }
+    except Exception:
+        return {"periodos_restantes": 0, "creditos_por_periodo": 0, "ok": False}
+
+
+def _carga_promedio(df) -> dict:
+    """Calcula la carga promedio de materias por periodo del estudiante.
+    Retorna: {promedio, max, min, total_periodos}"""
+    if df is None or df.empty or "periodo" not in df.columns:
+        return {"promedio": 0, "max": 0, "min": 0, "total_periodos": 0}
+
+    try:
+        # Solo periodos con materias APROBADA o REPROBADA (no EN_CURSO ni SIN_REGISTRAR)
+        df2 = df[df["estatus"].str.upper().isin(["APROBADA", "REPROBADA"])]
+        if df2.empty:
+            return {"promedio": 0, "max": 0, "min": 0, "total_periodos": 0}
+
+        por_periodo = df2.groupby("periodo").size()
+        return {
+            "promedio": round(float(por_periodo.mean()), 1),
+            "max": int(por_periodo.max()),
+            "min": int(por_periodo.min()),
+            "total_periodos": int(len(por_periodo)),
+        }
+    except Exception:
+        return {"promedio": 0, "max": 0, "min": 0, "total_periodos": 0}
+
+
+def _tasa_aprobacion_por_categoria(df, mapa: dict) -> dict:
+    """Calcula la tasa de aprobacion por categoria del plan.
+    Retorna: {categoria: {aprobadas, reprobadas, tasa}}"""
+    if df is None or df.empty:
+        return {}
+
+    try:
+        resultado = {}
+        df2 = df[df["estatus"].str.upper().isin(["APROBADA", "REPROBADA"])].copy()
+        if df2.empty:
+            return {}
+
+        df2["categoria"] = df2["clave"].str.upper().map(
+            lambda c: mapa.get(c, {}).get("categoria", "DESCONOCIDA")
+        )
+
+        for cat, grupo in df2.groupby("categoria"):
+            apr = int((grupo["estatus"].str.upper() == "APROBADA").sum())
+            rep = int((grupo["estatus"].str.upper() == "REPROBADA").sum())
+            total = apr + rep
+            tasa = round((apr / total * 100), 1) if total > 0 else 0
+            resultado[cat] = {"aprobadas": apr, "reprobadas": rep, "tasa": tasa}
+
+        return resultado
+    except Exception:
+        return {}
+
+
+def _mejor_peor_periodo(df) -> dict:
+    """Identifica el mejor y peor periodo del estudiante.
+    Retorna: {mejor: {periodo, promedio}, peor: {periodo, promedio}}"""
+    if df is None or df.empty:
+        return {}
+
+    try:
+        df2 = df.copy()
+        df2["calificacion"] = pd.to_numeric(df2["calificacion"], errors="coerce")
+        df2 = df2[df2["calificacion"].notna() & (df2["calificacion"] > 0)]
+        df2 = df2[df2["estatus"].str.upper().isin(["APROBADA", "REPROBADA"])]
+        if df2.empty or "periodo" not in df2.columns:
+            return {}
+
+        por_periodo = df2.groupby("periodo")["calificacion"].mean()
+        if por_periodo.empty:
+            return {}
+
+        mejor_p = por_periodo.idxmax()
+        peor_p = por_periodo.idxmin()
+
+        return {
+            "mejor": {"periodo": str(mejor_p), "promedio": round(float(por_periodo[mejor_p]), 2)},
+            "peor": {"periodo": str(peor_p), "promedio": round(float(por_periodo[peor_p]), 2)},
+        }
+    except Exception:
+        return {}
+
+
+def _distribucion_calificaciones(df) -> dict:
+    """Cuenta cuantas materias aprobadas tiene con cada calificacion (10, 9, 8, 7)."""
+    if df is None or df.empty:
+        return {}
+
+    try:
+        aprobadas = df[df["estatus"].str.upper() == "APROBADA"].copy()
+        aprobadas["calificacion"] = pd.to_numeric(aprobadas["calificacion"], errors="coerce")
+        aprobadas = aprobadas[aprobadas["calificacion"].notna()]
+        if aprobadas.empty:
+            return {}
+
+        dist = {}
+        for calif in [10, 9, 8, 7]:
+            dist[calif] = int((aprobadas["calificacion"] == calif).sum())
+        return dist
+    except Exception:
+        return {}
+
+
 @tool
 def resumen_estudiante() -> str:
     """Retorna datos del estudiante + evaluación de regularidad + alertas + requisitos de egreso. Úsalo para cualquier pregunta sobre cómo va el alumno."""
     datos = _session_ref.get("datos_estudiante")
     if not datos:
-        return "Sin datos. El usuario debe subir Historial y Kardex en el panel lateral."
+        return (
+            "No tengo acceso a datos del estudiante. "
+            "Verifica que el Historial Academico y el Kardex esten subidos en el panel lateral "
+            "y que el procesamiento haya terminado (debe aparecer un mensaje de exito). "
+            "Si ya los subiste, intenta recargar la pagina o volver a subir los PDF."
+        )
 
     cred_total = _session_ref.get("creditos_totales", 404)
     cred_acum = _session_ref.get("creditos_acumulados", datos.total_creditos)
@@ -117,16 +295,22 @@ def resumen_estudiante() -> str:
     es_condicional = "CONDICIONAL" in sit
 
     # Análisis del historial
-    # Usar historial_calculo (normalizado, último estatus por materia, RECURSANDO→REPROBADA, sin EN_CURSO)
-    # para que el índice de reprobación coincida exactamente con lo que muestra el dashboard.
+    # Se reportan DOS metricas de reprobacion porque miden cosas distintas:
+    # 1) Indice actual (del dashboard): usa historial_calculo (canonico: ultimo estado por materia).
+    #    Formula: materias con ultimo estado REPROBADA / materias cursadas. Esto es lo oficial.
+    # 2) Total historico de reprobaciones: usa historial_df (raw: todos los intentos).
+    #    Cuenta cada intento reprobado aunque despues el alumno haya aprobado la materia.
     df_raw = _session_ref.get("historial_df")
-    df = _session_ref.get("historial_calculo") or df_raw  # historial_calculo es el canónico
+    _hc = _session_ref.get("historial_calculo")
+    df = _hc if (_hc is not None and hasattr(_hc, "empty") and not _hc.empty) else df_raw
     aprobadas = 0
     reprobadas_detalle = []
     en_curso_count = 0
     _mat_reprobadas_count = 0
     _mat_cursadas_count = 0
     _indice_reprobacion = 0.0
+    _intentos_reprobados_total = 0
+    _materias_con_reprobacion_distintas = 0
     if df is not None and not df.empty:
         aprobadas = len(df[df["estatus"].str.upper() == "APROBADA"])
         # EN_CURSO/RECURSANDO (sólo en el raw, historial_calculo ya los excluye)
@@ -134,23 +318,36 @@ def resumen_estudiante() -> str:
             en_curso = df_raw[df_raw["estatus"].str.upper().isin(["EN_CURSO", "RECURSANDO"])]
             en_curso_count = len(en_curso)
 
-        # Índice de reprobación: misma fórmula que el dashboard
+        # Indice OFICIAL (canonico): materias pendientes de aprobar ahora
         _mat_reprobadas_count = int((df["estatus"].str.upper() == "REPROBADA").sum())
         _mat_cursadas_count = int(df["estatus"].str.upper().isin(["APROBADA", "REPROBADA"]).sum())
         _indice_reprobacion = (_mat_reprobadas_count / _mat_cursadas_count * 100) if _mat_cursadas_count > 0 else 0.0
 
-        # Materias reprobadas con conteo
+        # Metrica HISTORICA: todos los intentos reprobados (aunque despues hayan sido aprobados)
+        if df_raw is not None and not df_raw.empty:
+            _intentos_reprobados_total = int((df_raw["estatus"].str.upper() == "REPROBADA").sum())
+            rep_raw = df_raw[df_raw["estatus"].str.upper() == "REPROBADA"]
+            if not rep_raw.empty:
+                _materias_con_reprobacion_distintas = int(rep_raw["clave"].nunique())
+
+        # Materias que AHORA siguen reprobadas (no aprobadas despues)
         rep = df[df["estatus"].str.upper() == "REPROBADA"]
         if not rep.empty:
-            conteo = rep.groupby("clave").size()
-            for clave, veces in conteo.items():
-                nombre = df[df["clave"] == clave]["nombre"].iloc[0] if len(df[df["clave"] == clave]) > 0 else clave
+            # Contar cuantos intentos totales tuvo cada clave (en el raw)
+            for clave in rep["clave"].unique():
+                nombre_rows = df[df["clave"] == clave]["nombre"]
+                nombre = nombre_rows.iloc[0] if len(nombre_rows) > 0 else clave
+                # Total de intentos reprobados en la historia
+                if df_raw is not None and not df_raw.empty:
+                    veces = int(((df_raw["clave"] == clave) & (df_raw["estatus"].str.upper() == "REPROBADA")).sum())
+                else:
+                    veces = 1
                 if veces >= 3:
                     reprobadas_detalle.append(f"  BAJA DEFINITIVA: {clave} ({nombre}) — {veces} reprobaciones")
                 elif veces == 2:
                     reprobadas_detalle.append(f"  TERCERA OPORTUNIDAD: {clave} ({nombre}) — próximo intento es el último")
                 else:
-                    reprobadas_detalle.append(f"  {clave} ({nombre}) — {veces} reprobación")
+                    reprobadas_detalle.append(f"  {clave} ({nombre}) — 1 reprobación previa")
 
     mapa = _cargar_mapa()
     mat_pend = len(mapa) - aprobadas
@@ -187,18 +384,68 @@ def resumen_estudiante() -> str:
         prefijo = "🔴" if sev == "CRITICA" else "🟠"
         riesgos.append(f"{prefijo} {tipo}: {desc}")
 
+    # ── Analisis enriquecido ──
+    df_analisis = df_raw if df_raw is not None else df
+    tendencia = _analizar_tendencia_promedio(df_analisis)
+    proyeccion = _proyectar_egreso(df_analisis, cred_acum, cred_total)
+    carga = _carga_promedio(df_analisis)
+    tasas_cat = _tasa_aprobacion_por_categoria(df_analisis, mapa)
+
     out = (
         f"DATOS: {datos.matricula} | {datos.nombre} | {datos.situacion}\n"
         f"Plan: {datos.plan_estudios} | Promedio: {datos.promedio_general}\n"
         f"Créditos: {cred_acum}/{cred_total} ({pct}%) | Faltan: {cred_falt}\n"
         f"Semestre: {sem}/8 | Restantes: {max(0,8-sem)} | En curso: {en_curso_count} materias\n"
         f"Materias: {aprobadas} aprobadas, {mat_pend} pendientes\n"
-        f"Índice de reprobación: {_indice_reprobacion:.1f}% ({_mat_reprobadas_count} reprobadas / {_mat_cursadas_count} cursadas)\n"
+        f"Índice de reprobación actual (oficial): {_indice_reprobacion:.1f}% — {_mat_reprobadas_count} materias pendientes de aprobar / {_mat_cursadas_count} cursadas\n"
+    )
+
+    # Metrica historica solo si difiere del indice actual
+    if _intentos_reprobados_total > _mat_reprobadas_count:
+        out += (
+            f"Historial de intentos reprobados: {_intentos_reprobados_total} intentos en {_materias_con_reprobacion_distintas} materias distintas "
+            f"(incluye materias que ya aprobó en intentos posteriores)\n"
+        )
+
+    out += (
         f"Especialidad: {esp}\n"
         f"\nREGULARIDAD: {regularidad} (avance real {pct}% vs esperado ~{avance_esperado}%)\n"
         f"RIESGOS: {'; '.join(riesgos) if riesgos else 'Ninguno identificado'}\n"
         f"\nINGLÉS: {nivel_ing} | Completo: {'Sí' if ing_ok else 'No — PENDIENTE'}\n"
     )
+
+    # Tendencia del promedio
+    if tendencia["ultimos_promedios"]:
+        ultimos_str = " -> ".join(f"{p}:{v}" for p, v in tendencia["ultimos_promedios"])
+        flecha = {"subiendo": "^", "bajando": "v", "estable": "~"}.get(tendencia["tendencia"], "")
+        diff = tendencia["diff"]
+        diff_str = f"(+{diff})" if diff > 0 else f"({diff})"
+        out += f"\nTENDENCIA PROMEDIO: {tendencia['tendencia'].upper()} {flecha} {diff_str}\n"
+        out += f"  Últimos periodos: {ultimos_str}\n"
+
+    # Carga promedio
+    if carga["total_periodos"] > 0:
+        out += f"\nCARGA ACADÉMICA HISTÓRICA:\n"
+        out += f"  Promedio: {carga['promedio']} materias/periodo | Max: {carga['max']} | Min: {carga['min']}\n"
+        out += f"  Periodos cursados: {carga['total_periodos']}\n"
+
+    # Proyeccion de egreso
+    if proyeccion["ok"]:
+        out += f"\nPROYECCIÓN DE EGRESO (con ritmo actual):\n"
+        out += f"  Créditos por periodo: {proyeccion['creditos_por_periodo']}\n"
+        out += f"  Periodos restantes estimados: {proyeccion['periodos_restantes']}\n"
+
+    # Tasa de aprobacion por categoria
+    if tasas_cat:
+        out += f"\nTASA DE APROBACIÓN POR CATEGORÍA:\n"
+        orden_cat = ["BASICA", "PRE_ESPECIALIDAD", "ELECCION_LIBRE", "CO_CURRICULAR"]
+        for cat in orden_cat:
+            if cat in tasas_cat:
+                d = tasas_cat[cat]
+                out += f"  {cat}: {d['tasa']}% ({d['aprobadas']} aprobadas / {d['aprobadas']+d['reprobadas']} cursadas)\n"
+        for cat, d in tasas_cat.items():
+            if cat not in orden_cat:
+                out += f"  {cat}: {d['tasa']}% ({d['aprobadas']} aprobadas / {d['aprobadas']+d['reprobadas']} cursadas)\n"
 
     if reprobadas_detalle:
         out += "\nREPROBADAS:\n" + "\n".join(reprobadas_detalle)
@@ -217,7 +464,10 @@ def diagnostico_academico() -> str:
     """Análisis profundo: materias críticas por seriación, cuellos de botella, riesgo de atraso, y materias que el alumno debería priorizar. Para preguntas como '¿está en riesgo?', '¿qué debería priorizar?', '¿cuáles son las más importantes?'."""
     datos = _session_ref.get("datos_estudiante")
     if not datos:
-        return "Sin datos cargados."
+        return (
+            "No tengo acceso a datos del estudiante. "
+            "Verifica que los PDF (Historial y Kardex) esten subidos y procesados en el panel lateral."
+        )
 
     mapa = _cargar_mapa()
     df = _session_ref.get("historial_df")
@@ -302,7 +552,7 @@ def diagnostico_academico() -> str:
 
 @tool
 def buscar_materia(consulta: str) -> str:
-    """Busca materia por nombre o clave. Retorna: info, prerrequisitos, dependientes, impacto en cadena si reprueba, e historial del estudiante. Para preguntas como '¿qué pasa si reprueba X?', '¿qué materias dependen de X?'."""
+    """Busca materia por nombre o clave. Retorna: info, prerrequisitos cumplidos/faltantes, dependientes, impacto en cadena si reprueba, historial del estudiante, periodo ideal recomendado, y contexto segun categoria (pre-especialidad o eleccion libre). Para preguntas como 'que pasa si reprueba X?', 'que materias dependen de X?', 'cuando deberia llevar Y?'."""
     mapa = _cargar_mapa()
     matches = _buscar_en_mapa(consulta)
 
@@ -315,8 +565,23 @@ def buscar_materia(consulta: str) -> str:
     if df is not None and not df.empty:
         aprobadas_set = set(df[df["estatus"].str.upper() == "APROBADA"]["clave"].str.upper())
 
+    resultado_exp = _session_ref.get("resultado_experto") or {}
+    sem_actual = resultado_exp.get("semestre_cursado", 0)
+    esp_activa = (
+        _session_ref.get("especialidad_forzada")
+        or resultado_exp.get("especialidad_detectada")
+        or ""
+    )
+
     for clave, info in matches[:3]:
-        reqs = ", ".join(info.get("requisitos", [])) or "Ninguno"
+        ciclo_materia = info.get("ciclo", 0)
+        categoria = info.get("categoria", "")
+        reqs_lista = info.get("requisitos", [])
+        reqs = ", ".join(reqs_lista) or "Ninguno"
+
+        # Prerrequisitos cumplidos vs faltantes
+        reqs_cumplidos = [r for r in reqs_lista if r.upper() in aprobadas_set]
+        reqs_faltantes = [r for r in reqs_lista if r.upper() not in aprobadas_set]
 
         # Dependientes directos
         deps_directos = _contar_dependientes(clave, mapa)
@@ -326,10 +591,37 @@ def buscar_materia(consulta: str) -> str:
         cascada = _cadena_impacto(clave, mapa)
         cascada_pendiente = [c for c in cascada if c not in aprobadas_set]
 
+        # Periodo ideal
+        if ciclo_materia and sem_actual:
+            if ciclo_materia == sem_actual:
+                periodo_ideal = f"Ciclo {ciclo_materia} — es de su semestre actual, conviene cargarla ya"
+            elif ciclo_materia < sem_actual:
+                atraso = sem_actual - ciclo_materia
+                periodo_ideal = f"Ciclo {ciclo_materia} — ATRASADA por {atraso} semestre(s), priorizar"
+            else:
+                adelanto = ciclo_materia - sem_actual
+                periodo_ideal = f"Ciclo {ciclo_materia} — falta {adelanto} semestre(s) para el momento ideal"
+        else:
+            periodo_ideal = f"Ciclo {ciclo_materia}" if ciclo_materia else "No definido"
+
         linea = (
-            f"{clave} — {info.get('nombre')} | Ciclo {info.get('ciclo')} | "
-            f"{info.get('creditos')}cr | {info.get('categoria')}\n"
+            f"{clave} — {info.get('nombre')} | Ciclo {ciclo_materia} | "
+            f"{info.get('creditos')}cr | {categoria}\n"
             f"  Prerrequisitos: {reqs}\n"
+        )
+
+        # Estado de prerrequisitos
+        if reqs_lista:
+            if not reqs_faltantes:
+                linea += f"  ✓ Prerrequisitos CUMPLIDOS: el alumno puede cursarla\n"
+            else:
+                faltantes_str = ", ".join(
+                    f"{r} ({mapa.get(r.upper(), {}).get('nombre','')})"
+                    for r in reqs_faltantes
+                )
+                linea += f"  ✗ Prerrequisitos FALTANTES: {faltantes_str}\n"
+
+        linea += (
             f"  Dependientes directos: {deps_str}\n"
             f"  IMPACTO SI REPRUEBA: {len(cascada_pendiente)} materias bloqueadas en cascada"
         )
@@ -337,6 +629,49 @@ def buscar_materia(consulta: str) -> str:
             linea += f": {', '.join(cascada_pendiente[:8])}"
             if len(cascada_pendiente) > 8:
                 linea += f" (+{len(cascada_pendiente)-8} más)"
+        linea += f"\n  Periodo ideal: {periodo_ideal}\n"
+
+        # Contexto segun categoria
+        if categoria == "PRE_ESPECIALIDAD":
+            # ¿A que linea pertenece?
+            clave_u = clave.upper()
+            if clave_u.startswith("IT") or clave_u.startswith("IA"):
+                linea_preesp = "Innovación en TIC"
+            elif clave_u.startswith("NI") or clave_u.startswith("IL"):
+                linea_preesp = "Inteligencia Organizacional y de Negocios"
+            else:
+                linea_preesp = "pre-especialidad"
+            alineada = esp_activa and linea_preesp.lower() in esp_activa.lower()
+            if esp_activa:
+                if alineada:
+                    linea += f"  PRE-ESPECIALIDAD — pertenece a la línea {linea_preesp} (alineada con la especialidad del alumno)\n"
+                else:
+                    linea += f"  PRE-ESPECIALIDAD — pertenece a la línea {linea_preesp} (distinta a '{esp_activa}': puede contar como elección libre)\n"
+            else:
+                linea += f"  PRE-ESPECIALIDAD — línea {linea_preesp}\n"
+
+        elif categoria == "ELECCION_LIBRE":
+            # Contar cuantas EL tiene aprobadas
+            el_info = _session_ref.get("eleccion_libre_info")
+            if el_info and isinstance(el_info, dict):
+                try:
+                    total_req = sum(el_info.get(f"ciclo_{c}", {}).get("requeridas", 0) for c in [1, 2, "3_y_4"])
+                    total_apr = sum(el_info.get(f"ciclo_{c}", {}).get("aprobadas_count", 0) for c in [1, 2, "3_y_4"])
+                    linea += f"  ELECCIÓN LIBRE — progreso global: {total_apr}/{total_req} aprobadas\n"
+                except Exception:
+                    pass
+
+        elif categoria == "CO_CURRICULAR":
+            clave_u = clave.upper()
+            if clave_u.startswith("AD"):
+                tipo_co = "Actividad Deportiva"
+            elif clave_u.startswith("TA") or clave_u.startswith("AC"):
+                tipo_co = "Actividad Cultural"
+            elif clave_u.startswith("LI"):
+                tipo_co = "Idioma — Inglés"
+            else:
+                tipo_co = "Co-curricular"
+            linea += f"  CO-CURRICULAR — {tipo_co}\n"
 
         # Historial del estudiante
         if df is not None and not df.empty:
@@ -348,15 +683,15 @@ def buscar_materia(consulta: str) -> str:
                         f"{row.get('estatus')} cal:{row.get('calificacion','')} P:{row.get('periodo','')}"
                     )
                 n_reprobadas = sum(1 for i in intentos if "REPROBADA" in i)
-                linea += f"\n  Historial: {' | '.join(intentos)}"
+                linea += f"  Historial del alumno: {' | '.join(intentos)}"
                 if n_reprobadas >= 2:
                     linea += f"\n  ⚠ ALERTA: {n_reprobadas} reprobaciones — próximo intento es ÚLTIMA OPORTUNIDAD"
                 elif n_reprobadas == 1:
                     linea += f"\n  Nota: 1 reprobación previa — le quedan 2 intentos"
             else:
-                linea += "\n  Historial: No cursada aún"
+                linea += "  Historial del alumno: No cursada aún"
 
-        resultados.append(linea)
+        resultados.append(linea.rstrip())
 
     return "\n\n".join(resultados)
 
@@ -367,33 +702,90 @@ def buscar_materia(consulta: str) -> str:
 
 @tool
 def consultar_historial(filtro: str = "") -> str:
-    """Lista materias del historial. Filtros: APROBADA, REPROBADA, EN_CURSO, o vacío para todo. Incluye conteo de intentos en reprobadas."""
+    """Lista materias del historial con analisis. Filtros: APROBADA, REPROBADA, EN_CURSO, RECURSANDO, o vacío para resumen general. Incluye mejor/peor periodo, distribucion de calificaciones y desglose por categoria."""
     df = _session_ref.get("historial_df")
     if df is None or df.empty:
         return "Sin historial cargado."
 
-    if filtro:
-        f_upper = filtro.upper().strip()
-        if f_upper in ("RECURSANDO",):
-            df_f = df[df["estatus"].str.upper().isin(["EN_CURSO", "RECURSANDO"])]
-        else:
-            df_f = df[df["estatus"].str.upper() == f_upper]
+    mapa = _cargar_mapa()
+
+    # Si no hay filtro, mostrar resumen analitico general (no todas las materias)
+    if not filtro or not filtro.strip():
+        out_lines = [f"HISTORIAL ACADÉMICO — Resumen analítico\n"]
+
+        # Conteos por estatus
+        por_estatus = df["estatus"].str.upper().value_counts().to_dict()
+        out_lines.append("POR ESTATUS:")
+        for est in ["APROBADA", "REPROBADA", "EN_CURSO", "RECURSANDO", "SIN_REGISTRAR"]:
+            if est in por_estatus:
+                out_lines.append(f"  {est}: {por_estatus[est]}")
+        out_lines.append("")
+
+        # Desglose por categoria
+        desglose = _tasa_aprobacion_por_categoria(df, mapa)
+        if desglose:
+            out_lines.append("POR CATEGORÍA (cursadas):")
+            for cat, d in desglose.items():
+                total = d["aprobadas"] + d["reprobadas"]
+                out_lines.append(f"  {cat}: {d['aprobadas']} aprobadas de {total} ({d['tasa']}%)")
+            out_lines.append("")
+
+        # Mejor / peor periodo
+        mp = _mejor_peor_periodo(df)
+        if mp:
+            out_lines.append("PERIODOS DESTACADOS:")
+            out_lines.append(f"  Mejor: {mp['mejor']['periodo']} (promedio {mp['mejor']['promedio']})")
+            out_lines.append(f"  Peor: {mp['peor']['periodo']} (promedio {mp['peor']['promedio']})")
+            out_lines.append("")
+
+        # Distribucion de calificaciones
+        dist = _distribucion_calificaciones(df)
+        if dist:
+            out_lines.append("DISTRIBUCIÓN DE CALIFICACIONES (aprobadas):")
+            total_calif = sum(dist.values())
+            for calif in [10, 9, 8, 7]:
+                n = dist.get(calif, 0)
+                pct = round(n / total_calif * 100, 1) if total_calif > 0 else 0
+                out_lines.append(f"  {calif}: {n} materias ({pct}%)")
+            out_lines.append("")
+
+        # Materias recursando (cursadas mas de 1 vez)
+        try:
+            conteo_claves = df.groupby("clave").size()
+            multiples = conteo_claves[conteo_claves >= 2]
+            if not multiples.empty:
+                out_lines.append(f"MATERIAS CURSADAS 2+ VECES ({len(multiples)}):")
+                for clave, veces in multiples.items():
+                    nombre = df[df["clave"] == clave]["nombre"].iloc[0] if len(df[df["clave"] == clave]) > 0 else clave
+                    out_lines.append(f"  {clave} {nombre}: {veces} veces")
+                out_lines.append("")
+        except Exception:
+            pass
+
+        out_lines.append('Para ver el listado completo filtrado, usa filtro="APROBADA", "REPROBADA", "EN_CURSO" o "RECURSANDO".')
+        return "\n".join(out_lines)
+
+    # Con filtro: mostrar listado completo + analisis
+    f_upper = filtro.upper().strip()
+    if f_upper == "RECURSANDO":
+        df_f = df[df["estatus"].str.upper().isin(["EN_CURSO", "RECURSANDO"])]
     else:
-        df_f = df
+        df_f = df[df["estatus"].str.upper() == f_upper]
 
     if df_f.empty:
         return f"Sin materias con estatus '{filtro}'."
 
     lineas = []
     for _, row in df_f.iterrows():
+        cat = mapa.get(str(row.get("clave", "")).upper(), {}).get("categoria", "?")
         lineas.append(
             f"- {row.get('clave','?')} {row.get('nombre','?')} | C{row.get('ciclo','?')} | "
-            f"{row.get('estatus','?')} | {row.get('calificacion','')} | P:{row.get('periodo','')}"
+            f"{cat} | cal:{row.get('calificacion','')} | P:{row.get('periodo','')}"
         )
 
-    # Si filtro es REPROBADA, agregar análisis de intentos
+    # Análisis adicional según filtro
     extra = ""
-    if filtro and filtro.upper() == "REPROBADA":
+    if f_upper == "REPROBADA":
         conteo = df_f.groupby("clave").size()
         terceras = conteo[conteo >= 2]
         if not terceras.empty:
@@ -401,8 +793,19 @@ def consultar_historial(filtro: str = "") -> str:
             for clave, veces in terceras.items():
                 nombre = df_f[df_f["clave"] == clave]["nombre"].iloc[0] if len(df_f[df_f["clave"] == clave]) > 0 else clave
                 extra += f"  ⚠ {clave} {nombre}: {veces} reprobaciones\n"
+        # Categoria mas afectada
+        cats = df_f["clave"].str.upper().map(lambda c: mapa.get(c, {}).get("categoria", "?"))
+        conteo_cat = cats.value_counts()
+        if not conteo_cat.empty:
+            extra += f"\nCategoría más afectada: {conteo_cat.index[0]} ({conteo_cat.iloc[0]} reprobaciones)"
 
-    out = f"Total: {len(df_f)}\n" + "\n".join(lineas)
+    elif f_upper == "APROBADA":
+        # Creditos aprobados
+        if "creditos" in df_f.columns:
+            total_cred = df_f["creditos"].fillna(0).sum()
+            extra = f"\n\nCréditos aprobados: {int(total_cred)}"
+
+    out = f"Total: {len(df_f)} materias con estatus '{filtro.upper()}'\n\n" + "\n".join(lineas)
     return out + extra
 
 
@@ -436,6 +839,103 @@ def consultar_candidatas() -> str:
             lineas.append(f"  - {c.get('clave')} {c.get('nombre')} C{c.get('ciclo')} {c.get('creditos')}cr | {c.get('razon','')}")
 
     return "\n".join(lineas)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  TOOL: Priorizar materias (orden estrategico para el asesor)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@tool
+def priorizar_materias() -> str:
+    """Devuelve el ORDEN ESTRATEGICO de materias que el estudiante debe priorizar, agrupadas por nivel de urgencia con justificacion. Responde preguntas como 'que debe priorizar?', 'que materias debe cargar primero?', 'por donde empezar?', 'que es lo mas urgente?'. Incluye creditos por grupo y recomendacion accionable."""
+    resultado = _session_ref.get("resultado_experto")
+    if not resultado:
+        return "Sistema experto no ejecutado. Cargar documentos primero."
+
+    candidatas = resultado.get("candidatas_detalles", [])
+    if not candidatas:
+        return "Sin materias candidatas. El estudiante puede haber completado el plan."
+
+    sem_c = resultado.get("semestre_cursado", "?")
+    sem_o = resultado.get("semestre_objetivo", "?")
+
+    # Agrupar por nivel de prioridad (el sistema experto ya los categoriza)
+    por_nivel = {}
+    for c in candidatas:
+        p = c.get("prioridad", 5)
+        nivel = c.get("nivel", "Otro")
+        key = (p, nivel)
+        por_nivel.setdefault(key, []).append(c)
+
+    # Etiquetas accionables por prioridad
+    _urgencia = {
+        1: ("CRITICO", "Resolver YA. Sin esto se bloquean materias que ya curso."),
+        2: ("URGENTE", "Recursar antes de que llegue a tercera oportunidad."),
+        3: ("ALTA", "Cerrar ciclos atrasados para no seguir acumulando rezago."),
+        4: ("NORMAL", "Progresion natural del plan."),
+        5: ("OPCIONAL", "Tomar si hay espacio despues de lo anterior."),
+        6: ("BAJA", "No bloquea egreso inmediato, pero debe completarse."),
+    }
+
+    out = [
+        f"ORDEN DE PRIORIZACION ESTRATEGICA (semestre cursado {sem_c} -> objetivo {sem_o})",
+        "=" * 72,
+    ]
+
+    # Recomendacion global
+    datos = _session_ref.get("datos_estudiante")
+    max_materias = 4 if (datos and any(s in str(datos.situacion).upper() for s in ["CONDICIONAL", "IRREGULAR"])) else 7
+    out.append(f"Limite de carga del alumno: maximo {max_materias} materias por semestre")
+    out.append("")
+
+    # Recorrer en orden de prioridad
+    orden_prioridad = sorted(por_nivel.keys(), key=lambda k: k[0])
+
+    for (prioridad, nivel) in orden_prioridad:
+        mats = por_nivel[(prioridad, nivel)]
+        urgencia, tip = _urgencia.get(prioridad, ("?", ""))
+        total_cr = sum(m.get("creditos", 0) for m in mats)
+
+        out.append(f"[{urgencia}] Prioridad {prioridad} — {nivel}  ({len(mats)} materia(s), {total_cr} creditos)")
+        out.append(f"  Accion: {tip}")
+        for m in mats:
+            razon = m.get("razon", "")
+            razon_short = razon[:70] + "..." if len(razon) > 70 else razon
+            out.append(
+                f"    - {m.get('clave')} {m.get('nombre')} (C{m.get('ciclo')}, {m.get('creditos')}cr)"
+                + (f" | {razon_short}" if razon_short else "")
+            )
+        out.append("")
+
+    # Recomendacion sintetica al final
+    out.append("RECOMENDACION:")
+
+    criticas = por_nivel.get((1, "Prerequisito faltante retroactivo"), [])
+    urgentes = por_nivel.get((2, "Materias reprobadas"), [])
+    atrasadas = []
+    for k, v in por_nivel.items():
+        if k[0] == 3:
+            atrasadas.extend(v)
+    ciclo_actual = []
+    for k, v in por_nivel.items():
+        if k[0] == 4:
+            ciclo_actual.extend(v)
+
+    if criticas:
+        out.append(f"  1. Cargar las {len(criticas)} materia(s) con PREREQUISITO RETROACTIVO (sin esto quedan materias 'fantasma' aprobadas sin su requisito).")
+    if urgentes:
+        out.append(f"  {'2' if criticas else '1'}. Recursar las {len(urgentes)} REPROBADAS pendientes (antes de que lleguen a tercera oportunidad).")
+    if atrasadas:
+        idx = 1 + (1 if criticas else 0) + (1 if urgentes else 0)
+        out.append(f"  {idx}. Cerrar {len(atrasadas)} materia(s) ATRASADAS de ciclos anteriores (empezando por la mas antigua).")
+    if ciclo_actual and max_materias > len(criticas) + len(urgentes) + len(atrasadas):
+        restante = max_materias - len(criticas) - len(urgentes) - len(atrasadas)
+        out.append(f"  Completar carga con hasta {restante} materia(s) del CICLO ACTUAL (progresion natural).")
+
+    out.append("")
+    out.append(f"NOTA: No exceder {max_materias} materias por semestre. Priorizar los grupos superiores antes que electivas.")
+
+    return "\n".join(out)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -949,6 +1449,7 @@ ALL_TOOLS = [
     buscar_materia,
     consultar_historial,
     consultar_candidatas,
+    priorizar_materias,
     comparar_carga,
     consultar_cargas,
     consultar_eleccion_libre,
@@ -993,6 +1494,36 @@ def _trim_history(messages: List, max_chars: int = 12000) -> List:
     return trimmed
 
 
+def _limpiar_latex(texto: str) -> str:
+    """Convierte notacion LaTeX a texto plano para que Streamlit lo renderice bien."""
+    import re
+
+    # \frac{a}{b} -> "a / b"
+    texto = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", r"\1 / \2", texto)
+    # \text{X} -> "X"
+    texto = re.sub(r"\\text\{([^{}]+)\}", r"\1", texto)
+    # \approx -> "aprox"
+    texto = texto.replace(r"\approx", "aprox").replace(r"\;", " ").replace(r"\ ", " ").replace(r"\,", " ")
+    # \sim -> "~"
+    texto = texto.replace(r"\sim", "~")
+    # \times -> "x"
+    texto = texto.replace(r"\times", "x")
+    # \cdot -> "·"
+    texto = texto.replace(r"\cdot", "·")
+    # Bloques [...math...]  o  \[...\]  -> quitar los delimitadores
+    texto = re.sub(r"\\\[(.*?)\\\]", r"\1", texto, flags=re.DOTALL)
+    texto = re.sub(r"\$\$(.*?)\$\$", r"\1", texto, flags=re.DOTALL)
+    texto = re.sub(r"\$([^$\n]+?)\$", r"\1", texto)
+    # Lineas que solo son "[" o "]" (delimitadores de bloque math) -> borrarlas
+    texto = re.sub(r"^\s*\[\s*$", "", texto, flags=re.MULTILINE)
+    texto = re.sub(r"^\s*\]\s*$", "", texto, flags=re.MULTILINE)
+    # Residuos de backslash + letra al inicio de palabra (comandos no mapeados) -> quitarles el backslash
+    texto = re.sub(r"\\([a-zA-Z]+)", r"\1", texto)
+    # Multiples saltos de linea consecutivos -> maximo 2
+    texto = re.sub(r"\n{3,}", "\n\n", texto)
+    return texto
+
+
 def _extraer_texto(content) -> str:
     """Extrae solo el texto de un content de AIMessage.
 
@@ -1015,6 +1546,8 @@ def _extraer_texto(content) -> str:
 
     # Limpiar newlines literales escapados y normalizar saltos de linea para markdown
     texto = texto.replace("\\n", "\n")
+    # Limpiar notacion LaTeX (red de seguridad)
+    texto = _limpiar_latex(texto)
     # Markdown necesita doble newline o dos espacios + newline para salto visual
     lineas = texto.split("\n")
     return "  \n".join(lineas)
@@ -1209,6 +1742,38 @@ def _consulta_datos_local(pregunta: str) -> Optional[str]:
     if df is None or (hasattr(df, 'empty') and df.empty):
         return None  # Sin datos, dejar pasar al LLM que dara el mensaje adecuado
 
+    # "que debe priorizar?" / "que materias priorizar?" / "por donde empezar?" / "que es lo urgente?"
+    # Keywords flexibles que pueden aparecer en cualquier parte
+    _sig_prioridad = [
+        "priorizar", "prioridad", "priorizara", "priorizaria", "priorice",
+        "empezar",  # "por donde empezar", "por cual empezar", "debe empezar"
+        "urgente", "urgencia", "critico", "importante",  # "mas urgente", "que es critico"
+        "orden de importancia", "estrategia de carga", "orden estrategico",
+    ]
+    _sig_contexto = ["materia", "cargar", "carga", "curso", "clase", "semestre", "alumno", "estudiante", "debe"]
+
+    _es_pregunta_prioridad = (
+        any(s in q_exp for s in _sig_prioridad)
+        and any(s in q_exp for s in _sig_contexto)
+    )
+
+    # Casos extra que no necesitan contexto
+    if not _es_pregunta_prioridad:
+        if any(s in q_exp for s in [
+            "que priorizar", "que priorizaria",
+            "cargar primero", "tomar primero", "llevar primero",
+            "orden estrategico", "orden de prioridad", "orden de carga",
+            "mas critico", "mas importante", "mas urgente",
+            "que hacer primero",
+        ]):
+            _es_pregunta_prioridad = True
+
+    if _es_pregunta_prioridad:
+        resultado = _session_ref.get("resultado_experto")
+        if resultado and resultado.get("candidatas_detalles"):
+            # Delegar a la tool priorizar_materias (invocacion directa)
+            return priorizar_materias.invoke({})
+
     # "índice de reprobación" / "tasa de reprobación" / "cuántas tronó" — calcular localmente
     # con historial_calculo para coincidir exactamente con el valor del dashboard.
     _es_pregunta_indice = (
@@ -1218,16 +1783,35 @@ def _consulta_datos_local(pregunta: str) -> Optional[str]:
         "tronar" in q_exp and any(s in q for s in ["indice", "tasa", "porcentaje", "porcent", "cuantas", "cuántas", "%"])
     )
     if _es_pregunta_indice:
-        df_calc = _session_ref.get("historial_calculo") or df
+        # Indice oficial (canonico): usa historial_calculo
+        _hc = _session_ref.get("historial_calculo")
+        df_calc = _hc if (_hc is not None and hasattr(_hc, "empty") and not _hc.empty) else df
         _n_rep = int((df_calc["estatus"].str.upper() == "REPROBADA").sum())
         _n_curs = int(df_calc["estatus"].str.upper().isin(["APROBADA", "REPROBADA"]).sum())
         _idx = round((_n_rep / _n_curs * 100), 1) if _n_curs > 0 else 0.0
-        return (
-            f"Índice de reprobación: **{_idx}%**\n\n"
-            f"- Materias reprobadas: {_n_rep}\n"
+
+        # Metrica historica (raw): todos los intentos reprobados
+        _n_intentos_rep = int((df["estatus"].str.upper() == "REPROBADA").sum())
+        _n_materias_con_rep = int(df[df["estatus"].str.upper() == "REPROBADA"]["clave"].nunique())
+
+        resp = (
+            f"**Índice de reprobación actual (oficial): {_idx}%**\n\n"
+            f"- Se calcula sobre el estado ACTUAL de cada materia (último intento registrado)\n"
+            f"- Materias que siguen pendientes de aprobar: {_n_rep}\n"
             f"- Materias cursadas (aprobadas + reprobadas): {_n_curs}\n"
-            f"- Fórmula: {_n_rep}/{_n_curs} × 100 = {_idx}%"
+            f"- Fórmula: {_n_rep}/{_n_curs} × 100 = {_idx}%\n"
         )
+
+        # Si hay diferencia con el historico, mostrarla
+        if _n_intentos_rep > _n_rep:
+            intentos_recuperados = _n_intentos_rep - _n_rep
+            resp += (
+                f"\n**Historial de reprobaciones (todos los intentos):** {_n_intentos_rep} intentos reprobados "
+                f"en {_n_materias_con_rep} materias distintas.\n"
+                f"De esas reprobaciones, {intentos_recuperados} ya fueron recuperadas (aprobó en intento posterior). "
+                f"Por eso el índice actual es menor que el total de intentos reprobados."
+            )
+        return resp
 
     # "que materias ha reprobado?" / "cuales reprobo?" / "tiene reprobadas?"
     _reprobada_signals = ["reprobar", "reprobada", "reprobado", "reprobadas", "ha reprobar"]
@@ -1410,7 +1994,6 @@ def respuesta_local(pregunta: str) -> Optional[str]:
     _llm_only = ["como va", "esta en riesgo", "diagnostico",
                  "que deberia cargar", "candidatas", "criticas",
                  "cuanto le falta", "cuantos semestres",
-    "indice de reprobacion", "tasa de reprobacion", "indice reprobacion",
                  # Preguntas sobre DATOS del estudiante (no sobre la regla)
                  "ya tiene", "tiene cubierta", "ya cumple", "cumple con",
                  "lleva la actividad", "tiene la actividad",
