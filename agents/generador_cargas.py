@@ -114,6 +114,7 @@ def es_carga_valida(
     max_materias: int,
     max_creditos: int = 54,
     min_creditos: int = 0,
+    min_materias: int = 3,
 ) -> bool:
     """Verifica que una carga sea válida."""
     if not secciones:
@@ -124,7 +125,9 @@ def es_carga_valida(
     if len(claves) != len(set(claves)):
         return False
 
-    # Verificar límite de materias
+    # Verificar rango de materias
+    if len(set(claves)) < min_materias:
+        return False
     if len(claves) > max_materias:
         return False
 
@@ -294,6 +297,7 @@ def generar_cargas_nsga3(
     max_materias: int = 8,
     max_creditos: int = 54,
     min_creditos: int = 0,
+    min_materias: int = 3,
     poblacion_size: int = 100,
     generaciones: int = 50,
     n_resultados: int = 3,
@@ -359,7 +363,7 @@ def generar_cargas_nsga3(
         return _generar_cargas_greedy(
             secciones_por_materia, materias_ordenadas,
             disponibilidad, materias_deseadas, max_materias,
-            max_creditos, n_resultados
+            max_creditos, min_materias, n_resultados
         )
 
     # --- Evolución NSGA-III ---
@@ -401,7 +405,7 @@ def generar_cargas_nsga3(
             hijo = _mutacion(hijo, secciones_por_materia)
 
             # Validar hijo
-            if es_carga_valida(hijo, disponibilidad, max_materias, max_creditos, min_creditos):
+            if es_carga_valida(hijo, disponibilidad, max_materias, max_creditos, min_creditos, min_materias):
                 hijos.append(hijo)
 
         poblacion = padres + hijos
@@ -418,7 +422,7 @@ def generar_cargas_nsga3(
             continue
         vistos.add(claves_key)
 
-        if not es_carga_valida(ind, disponibilidad, max_materias, max_creditos, min_creditos):
+        if not es_carga_valida(ind, disponibilidad, max_materias, max_creditos, min_creditos, min_materias):
             continue
 
         score_pri = objetivo_prioridad(ind, max_materias)
@@ -466,6 +470,7 @@ def _generar_cargas_greedy(
     materias_deseadas: int,
     max_materias: int,
     max_creditos: int,
+    min_materias: int,
     n_resultados: int,
 ) -> List[Dict]:
     """
@@ -510,7 +515,7 @@ def _generar_cargas_greedy(
                     creditos_total = nuevos_creditos
                     break
 
-        if carga:
+        if carga and len(set(s["clave"] for s in carga)) >= min_materias:
             claves_key = tuple(sorted(s["clave"] for s in carga))
             ya_existe = any(
                 tuple(sorted(s["clave"] for s in r["secciones"])) == claves_key
