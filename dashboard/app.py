@@ -2378,12 +2378,12 @@ def main():
         )
 
     # Verificar si hay datos — mostrar sólo la bienvenida si aún no se cargaron archivos
-    if "datos_estudiante" not in st.session_state:
+    if "datos_estudiante" not in st.session_state or "historial_df" not in st.session_state:
         pg = st.navigation([
             st.Page(_pg_inicio, title="Cómo usar el sistema", icon=":material/home:", default=True),
         ], position="sidebar")
         pg.run()
-        _render_agente_chat()
+        # El agente no se muestra hasta que ambos archivos estén cargados
         return
 
     datos = st.session_state.datos_estudiante
@@ -3576,10 +3576,15 @@ def main():
         import services.oferta_service as _oferta_mod
         _carpeta_oferta = Path(_oferta_mod.__file__).parent.parent / "agents" / "OfertaAcademica"
 
-        # Verificar que existan candidatas del sistema experto
+        # Ejecutar sistema experto automáticamente si aún no se ha corrido
         if "resultado_experto" not in st.session_state or not st.session_state.resultado_experto:
-            st.info("Primero ve a la pestaña **Sistema Experto** para generar las materias candidatas.")
-        else:
+            with st.spinner("Analizando materias candidatas..."):
+                ok = _ejecutar_sistema_experto_on_demand()
+            if not ok:
+                st.error("No se pudo analizar las materias. Verifica que el Historial Académico esté cargado correctamente.")
+                st.stop()
+
+        if True:
             resultado_exp = st.session_state.resultado_experto
             candidatas_det = resultado_exp.get("candidatas_detalles", [])
 
@@ -4086,199 +4091,6 @@ def main():
                     )
                     st.markdown(html_cards, unsafe_allow_html=True)
             st.divider()
-
-        # ---------------------------------------------------------------
-        # ANÁLISIS DE AVANCE POR SEMESTRE
-        # ---------------------------------------------------------------
-        st.subheader("📊 Análisis de avance por semestre")
-        st.caption(
-            "Se calcula el porcentaje de avance de cada semestre con la misma lógica que "
-            "usa el sistema experto para determinar el semestre actual. "
-            "Un semestre se considera superado cuando el avance es ≥ 75%."
-        )
-
-        # Construir sets de claves por categoría
-        _mapa_lista = mapa_curricular if isinstance(mapa_curricular, list) else []
-        _aprobadas_anal  = _aprobadas_mapa
-        _en_curso_anal   = _en_curso_mapa
-        _en_contacto_anal = _aprobadas_anal | _en_curso_anal
-
-        # Separar EL por ciclo del mapa (no por corte numérico global)
-        _el_plan_early = {
-            str(m.get("clave", "")).strip().upper()
-            for m in _mapa_lista
-            if m.get("categoria") == "ELECCION_LIBRE" and m.get("ciclo", 0) <= 4
-        }
-        _el_plan_late = {
-            str(m.get("clave", "")).strip().upper()
-            for m in _mapa_lista
-            if m.get("categoria") == "ELECCION_LIBRE" and m.get("ciclo", 0) >= 5
-        }
-        _preesp_plan = {
-            str(m.get("clave", "")).strip().upper()
-            for m in _mapa_lista if m.get("categoria") == "PREESPECIALIDAD"
-        }
-        _el_total_early_anal = len(_el_plan_early & _en_contacto_anal)
-        _el_total_late_anal  = len(_el_plan_late  & _en_contacto_anal)
-        _preesp_total_anal   = len(_preesp_plan   & _en_contacto_anal)
-
-        filas_avance = []
-        for _sem in range(1, 9):
-            _mats_sem = [m for m in _mapa_lista if m.get("ciclo") == _sem]
-            if not _mats_sem:
-                continue
-
-            _claves_sem = {str(m.get("clave", "")).strip().upper() for m in _mats_sem}
-            _tiene_contacto = bool(_claves_sem & _en_contacto_anal)
-
-            # Básicas del semestre (sin PID)
-            _basicas_sem = {
-                str(m.get("clave", "")).strip().upper()
-                for m in _mats_sem
-                if m.get("categoria") == "BASICA"
-                and not str(m.get("clave", "")).strip().upper().startswith("PID")
-            }
-            _cursadas_basicas = len(_basicas_sem & _en_contacto_anal)
-            _total_basicas = len(_basicas_sem)
-
-            # Crédito EL: sems 1-4 simple (1 por sem, sin carry-over),
-            # sems 5-8 acumulativo usando solo el excedente (late)
-            if _sem <= 4:
-                _el_credit = min(_el_total_early_anal, _sem) - min(_el_total_early_anal, _sem - 1)
-                _el_recom  = 1
-            else:
-                _el_acum_prev = EL_ACUMULADAS_CICLO.get(_sem - 1, 0)
-                _el_acum_curr = EL_ACUMULADAS_CICLO.get(_sem, 0)
-                _el_credit    = min(_el_total_late_anal, _el_acum_curr) - min(_el_total_late_anal, _el_acum_prev)
-                _el_recom     = EL_RECOMENDADAS_POR_CICLO.get(_sem, 0)
-
-            # Crédito PREESP acumulativo
-            _preesp_acum_prev = PREESP_ACUMULADAS_CICLO.get(_sem - 1, 0)
-            _preesp_acum_curr = PREESP_ACUMULADAS_CICLO.get(_sem, 0)
-            _preesp_credit    = min(_preesp_total_anal, _preesp_acum_curr) - min(_preesp_total_anal, _preesp_acum_prev)
-            _preesp_recom     = PREESP_RECOMENDADAS_POR_CICLO.get(_sem, 0)
-
-            _total_esperado  = _total_basicas + _el_recom + _preesp_recom
-            _total_cursado   = _cursadas_basicas + _el_credit + _preesp_credit
-            _porcentaje      = (_total_cursado / _total_esperado * 100) if _total_esperado > 0 else 0
-
-            if not _tiene_contacto:
-                _estado = "⬜ No iniciado"
-            elif _porcentaje >= 75:
-                _estado = "✅ Superado"
-            else:
-                _estado = "🔄 En curso"
-
-            filas_avance.append({
-                "Semestre": _sem,
-                "Básicas cursadas": f"{_cursadas_basicas} / {_total_basicas}",
-                "EL (crédito / recomendadas)": f"{_el_credit} / {_el_recom}",
-                "Preesp (crédito / recomendadas)": f"{_preesp_credit} / {_preesp_recom}",
-                "Total (cursado / esperado)": f"{_total_cursado} / {_total_esperado}",
-                "Avance": round(_porcentaje, 1),
-                "Estado": _estado,
-            })
-
-        if filas_avance:
-            df_avance = pd.DataFrame(filas_avance)
-
-            def _color_avance(row):
-                pct = row["Avance"]
-                estado = row["Estado"]
-                if estado == "⬜ No iniciado":
-                    return [""] * len(row)
-                elif pct >= 75:
-                    return ["background-color: #d1fae5"] * len(row)
-                elif pct >= 50:
-                    return ["background-color: #fef3c7"] * len(row)
-                else:
-                    return ["background-color: #fee2e2"] * len(row)
-
-            st.dataframe(
-                df_avance.style
-                    .apply(_color_avance, axis=1)
-                    .format({"Avance": "{:.1f}%"}),
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            st.markdown(
-                "**Interpretación:** "
-                "🟢 Verde = semestre superado (≥ 75%) · "
-                "🟡 Amarillo = en progreso (50–74%) · "
-                "🔴 Rojo = por debajo del umbral (< 50%) · "
-                "⬜ Gris = no iniciado."
-            )
-            st.info(
-                "ℹ️ El avance incluye: **Básicas** del semestre + **crédito acumulativo de Elección Libre** "
-                "(excedentes de semestres anteriores se transfieren) + **crédito acumulativo de Preespecialidad** "
-                "(ídem). Las materias PID (Prácticas Profesionales) no se cuentan aquí."
-            )
-
-        # ---------------------------------------------------------------
-        # TABLA DE VERIFICACIÓN: materias cargadas reales por semestre
-        # ---------------------------------------------------------------
-        st.subheader("🔍 Verificación: materias cargadas por semestre")
-        st.caption(
-            "Conteo real de materias que el alumno tiene en contacto (aprobadas, en curso o recursando) "
-            "por semestre, sin ningún criterio acumulativo. Sirve para verificar que los datos se registran correctamente."
-        )
-
-        filas_verif = []
-        _el_acum_real    = 0  # acumulado real de EL del alumno desde sem 5
-        _preesp_acum_real = 0  # acumulado real de PREESP del alumno desde sem 5
-        for _sem in range(1, 9):
-            _mats_sem = [m for m in _mapa_lista if m.get("ciclo") == _sem]
-            if not _mats_sem:
-                continue
-
-            _basicas_verif = {
-                str(m.get("clave", "")).strip().upper()
-                for m in _mats_sem
-                if m.get("categoria") == "BASICA"
-                and not str(m.get("clave", "")).strip().upper().startswith("PID")
-            }
-            _el_verif = {
-                str(m.get("clave", "")).strip().upper()
-                for m in _mats_sem
-                if m.get("categoria") == "ELECCION_LIBRE"
-            }
-            _preesp_verif = {
-                str(m.get("clave", "")).strip().upper()
-                for m in _mats_sem
-                if m.get("categoria") == "PREESPECIALIDAD"
-            }
-
-            _n_basicas = len(_basicas_verif & _en_contacto_anal)
-            _n_el      = len(_el_verif & _en_contacto_anal)
-            _n_preesp  = len(_preesp_verif & _en_contacto_anal) if _sem >= 5 else 0
-
-            # Acumulados reales desde sem 5
-            if _sem >= 5:
-                _el_acum_real     += _n_el
-                _preesp_acum_real += _n_preesp
-
-            filas_verif.append({
-                "Semestre":                    _sem,
-                "Básicas cargadas":            _n_basicas,
-                "Total básicas plan":          len(_basicas_verif),
-                "EL cargadas":                 _n_el,
-                "Total EL plan":               len(_el_verif),
-                "EL acum. real alumno":        _el_acum_real if _sem >= 5 else "—",
-                "EL_RECOMENDADAS_POR_CICLO":   EL_RECOMENDADAS_POR_CICLO.get(_sem, 0),
-                "EL_ACUMULADAS_CICLO (target)": EL_ACUMULADAS_CICLO.get(_sem, 0),
-                "Preesp cargadas":             _n_preesp if _sem >= 5 else "—",
-                "Total preesp plan":           len(_preesp_verif) if _sem >= 5 else "—",
-                "Preesp acum. real alumno":    _preesp_acum_real if _sem >= 5 else "—",
-                "PREESP_ACUMULADAS_CICLO (target)": PREESP_ACUMULADAS_CICLO.get(_sem, "—"),
-            })
-
-        if filas_verif:
-            st.dataframe(
-                pd.DataFrame(filas_verif),
-                use_container_width=True,
-                hide_index=True,
-            )
 
         st.markdown("""
 <div class="nav-cta-banner">
@@ -4896,8 +4708,8 @@ def main():
         st.Page(_pg_experto,  title="Materias Candidatas para Cargar", icon=":material/psychology:"),
         st.Page(_pg_cargas,   title="Generador de Cargas",             icon=":material/calendar_month:"),
         st.Page(_pg_mapa,     title="Mapa Curricular",                 icon=":material/map:"),
-        st.Page(_pg_pruebas,  title="Pruebas",                         icon=":material/science:"),
-        st.Page(_pg_oferta,   title="Oferta & Candidatas",             icon=":material/insights:"),
+        # st.Page(_pg_pruebas,  title="Pruebas",                         icon=":material/science:"),
+        # st.Page(_pg_oferta,   title="Oferta & Candidatas",             icon=":material/insights:"),
     ], position="sidebar")
     pg.run()
 

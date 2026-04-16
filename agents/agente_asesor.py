@@ -1843,7 +1843,8 @@ def _consulta_datos_local(pregunta: str) -> Optional[str]:
 
         lineas = []
         # Siempre mostrar el índice al inicio del bloque de reprobadas
-        df_calc2 = _session_ref.get("historial_calculo") or df
+        _hc2 = _session_ref.get("historial_calculo")
+        df_calc2 = _hc2 if _hc2 is not None else df
         _n_rep2 = int((df_calc2["estatus"].str.upper() == "REPROBADA").sum())
         _n_curs2 = int(df_calc2["estatus"].str.upper().isin(["APROBADA", "REPROBADA"]).sum())
         _idx2 = round((_n_rep2 / _n_curs2 * 100), 1) if _n_curs2 > 0 else 0.0
