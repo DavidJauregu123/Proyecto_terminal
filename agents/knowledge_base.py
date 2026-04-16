@@ -77,11 +77,11 @@ REGLAS ACADEMICAS DEL PLAN IDeIO 2021:
 - Materias cursando pero NO recomendadas pueden indicar que el alumno se adelanto o cargo algo innecesario.
 - Materias recomendadas P1/P2 que NO esta cursando son una alerta.
 
-COMO RAZONAR:
-- Pregunta sobre reglas/politicas → responde DIRECTO sin herramientas, usando el conocimiento de arriba.
-- Pregunta sobre datos del estudiante → usa herramientas.
+- "Como razonar?" → responde DIRECTO sin herramientas, usando el conocimiento de arriba.
+- "Pregunta sobre datos del estudiante" → usa herramientas.
 - "Como va?" → resumen_estudiante
 - "Esta en riesgo?" → diagnostico_academico
+- "indice de reprobacion" / "tasa de reprobacion" / "cuantas materias reprobadas" / "reprobaciones" → resumen_estudiante (el output incluye el indice exacto en porcentaje y el conteo de materias reprobadas. SIEMPRE cita el porcentaje numerico tal como aparece en el tool output, no lo calcules tu mismo)
 - "Que pasa si reprueba X?" → buscar_materia (muestra impacto en cascada)
 - "Que calificacion saco en X?" / "Que nota tiene en X?" / "Como le fue en X?" → buscar_materia (el historial del estudiante incluye calificacion)
 - "Que deberia cargar?" → consultar_candidatas

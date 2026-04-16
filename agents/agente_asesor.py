@@ -117,14 +117,27 @@ def resumen_estudiante() -> str:
     es_condicional = "CONDICIONAL" in sit
 
     # Análisis del historial
-    df = _session_ref.get("historial_df")
+    # Usar historial_calculo (normalizado, último estatus por materia, RECURSANDO→REPROBADA, sin EN_CURSO)
+    # para que el índice de reprobación coincida exactamente con lo que muestra el dashboard.
+    df_raw = _session_ref.get("historial_df")
+    df = _session_ref.get("historial_calculo") or df_raw  # historial_calculo es el canónico
     aprobadas = 0
     reprobadas_detalle = []
     en_curso_count = 0
+    _mat_reprobadas_count = 0
+    _mat_cursadas_count = 0
+    _indice_reprobacion = 0.0
     if df is not None and not df.empty:
         aprobadas = len(df[df["estatus"].str.upper() == "APROBADA"])
-        en_curso = df[df["estatus"].str.upper().isin(["EN_CURSO", "RECURSANDO"])]
-        en_curso_count = len(en_curso)
+        # EN_CURSO/RECURSANDO (sólo en el raw, historial_calculo ya los excluye)
+        if df_raw is not None and not df_raw.empty:
+            en_curso = df_raw[df_raw["estatus"].str.upper().isin(["EN_CURSO", "RECURSANDO"])]
+            en_curso_count = len(en_curso)
+
+        # Índice de reprobación: misma fórmula que el dashboard
+        _mat_reprobadas_count = int((df["estatus"].str.upper() == "REPROBADA").sum())
+        _mat_cursadas_count = int(df["estatus"].str.upper().isin(["APROBADA", "REPROBADA"]).sum())
+        _indice_reprobacion = (_mat_reprobadas_count / _mat_cursadas_count * 100) if _mat_cursadas_count > 0 else 0.0
 
         # Materias reprobadas con conteo
         rep = df[df["estatus"].str.upper() == "REPROBADA"]
@@ -180,6 +193,7 @@ def resumen_estudiante() -> str:
         f"Créditos: {cred_acum}/{cred_total} ({pct}%) | Faltan: {cred_falt}\n"
         f"Semestre: {sem}/8 | Restantes: {max(0,8-sem)} | En curso: {en_curso_count} materias\n"
         f"Materias: {aprobadas} aprobadas, {mat_pend} pendientes\n"
+        f"Índice de reprobación: {_indice_reprobacion:.1f}% ({_mat_reprobadas_count} reprobadas / {_mat_cursadas_count} cursadas)\n"
         f"Especialidad: {esp}\n"
         f"\nREGULARIDAD: {regularidad} (avance real {pct}% vs esperado ~{avance_esperado}%)\n"
         f"RIESGOS: {'; '.join(riesgos) if riesgos else 'Ninguno identificado'}\n"
@@ -1014,6 +1028,7 @@ def _extraer_texto(content) -> str:
 # Sinonimos: el usuario puede decir cualquiera y matchea igual
 _SINONIMOS = {
     "reprobar": ["reprobar", "reprueba", "repruebe", "reprobara", "tronar", "trone", "tronara",
+                  "tronado", "trono", "ha tronado", "ha tronar", "tronó",
                   "perder", "pierde", "pierda", "perdiera",
                   "no pasar", "no pase", "no aprobar", "no aprueba", "no apruebe",
                   "jalar", "jale", "jalara"],
@@ -1194,6 +1209,26 @@ def _consulta_datos_local(pregunta: str) -> Optional[str]:
     if df is None or (hasattr(df, 'empty') and df.empty):
         return None  # Sin datos, dejar pasar al LLM que dara el mensaje adecuado
 
+    # "índice de reprobación" / "tasa de reprobación" / "cuántas tronó" — calcular localmente
+    # con historial_calculo para coincidir exactamente con el valor del dashboard.
+    _es_pregunta_indice = (
+        ("indice" in q or "tasa" in q) and ("reprobar" in q_exp or "reprobacion" in q)
+    ) or (
+        # "cuantas tronó" / "cuántas ha tronado" + pregunta por índice/porcentaje/cantidad
+        "tronar" in q_exp and any(s in q for s in ["indice", "tasa", "porcentaje", "porcent", "cuantas", "cuántas", "%"])
+    )
+    if _es_pregunta_indice:
+        df_calc = _session_ref.get("historial_calculo") or df
+        _n_rep = int((df_calc["estatus"].str.upper() == "REPROBADA").sum())
+        _n_curs = int(df_calc["estatus"].str.upper().isin(["APROBADA", "REPROBADA"]).sum())
+        _idx = round((_n_rep / _n_curs * 100), 1) if _n_curs > 0 else 0.0
+        return (
+            f"Índice de reprobación: **{_idx}%**\n\n"
+            f"- Materias reprobadas: {_n_rep}\n"
+            f"- Materias cursadas (aprobadas + reprobadas): {_n_curs}\n"
+            f"- Fórmula: {_n_rep}/{_n_curs} × 100 = {_idx}%"
+        )
+
     # "que materias ha reprobado?" / "cuales reprobo?" / "tiene reprobadas?"
     _reprobada_signals = ["reprobar", "reprobada", "reprobado", "reprobadas", "ha reprobar"]
     if any(s in q_exp for s in _reprobada_signals) and not any(s in q_exp for s in ["que pasa", "si reprobar", "impacto", "consecuencia", "bloquea"]):
@@ -1222,8 +1257,18 @@ def _consulta_datos_local(pregunta: str) -> Optional[str]:
         # Ordenar normales por impacto (las que bloquean mas primero)
         normales.sort(key=lambda x: -x[3])
 
-        lineas = [f"El estudiante tiene {len(conteo)} materias reprobadas ({len(rep)} intentos en total)."]
-        lineas.append("")
+        lineas = []
+        # Siempre mostrar el índice al inicio del bloque de reprobadas
+        df_calc2 = _session_ref.get("historial_calculo") or df
+        _n_rep2 = int((df_calc2["estatus"].str.upper() == "REPROBADA").sum())
+        _n_curs2 = int(df_calc2["estatus"].str.upper().isin(["APROBADA", "REPROBADA"]).sum())
+        _idx2 = round((_n_rep2 / _n_curs2 * 100), 1) if _n_curs2 > 0 else 0.0
+        lineas = [
+            f"**Índice de reprobación: {_idx2}%** ({_n_rep2} reprobadas / {_n_curs2} cursadas)",
+            "",
+            f"El estudiante tiene {len(conteo)} materia(s) reprobada(s) ({len(rep)} intentos en total).",
+            "",
+        ]
 
         if criticas:
             lineas.append("ATENCION — Materias en riesgo:")
@@ -1365,6 +1410,7 @@ def respuesta_local(pregunta: str) -> Optional[str]:
     _llm_only = ["como va", "esta en riesgo", "diagnostico",
                  "que deberia cargar", "candidatas", "criticas",
                  "cuanto le falta", "cuantos semestres",
+    "indice de reprobacion", "tasa de reprobacion", "indice reprobacion",
                  # Preguntas sobre DATOS del estudiante (no sobre la regla)
                  "ya tiene", "tiene cubierta", "ya cumple", "cumple con",
                  "lleva la actividad", "tiene la actividad",

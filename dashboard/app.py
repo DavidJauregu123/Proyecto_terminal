@@ -99,6 +99,58 @@ st.markdown("""
         font-weight: bold;
         margin-left: 5px;
     }
+
+    /* ── Botones de navegación entre secciones ── */
+    div[data-testid="stButton"].nav-next > button {
+        height: 60px !important;
+        font-size: 1.1rem !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.4px;
+        background: linear-gradient(135deg, #1565c0 0%, #0d47a1 100%) !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 12px !important;
+        box-shadow: 0 4px 18px rgba(21,101,192,0.45) !important;
+        transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+    }
+    div[data-testid="stButton"].nav-next > button:hover {
+        transform: translateY(-3px) !important;
+        box-shadow: 0 8px 24px rgba(21,101,192,0.55) !important;
+    }
+    div[data-testid="stButton"].nav-next > button:active {
+        transform: translateY(0) !important;
+    }
+
+    /* Banner CTA previo al botón */
+    .nav-cta-banner {
+        margin-top: 36px;
+        padding: 18px 24px 16px 24px;
+        background: linear-gradient(135deg, #f0f7ff 0%, #e8f0fe 100%);
+        border-radius: 14px 14px 0 0;
+        border: 1.5px solid #3b82f6;
+        border-bottom: none;
+        text-align: center;
+    }
+    .nav-cta-banner .nav-cta-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: #1565c0;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        margin-bottom: 4px;
+    }
+    .nav-cta-banner .nav-cta-desc {
+        font-size: 0.97rem;
+        color: #1e3a5f;
+        font-weight: 500;
+        margin: 0;
+    }
+    /* Pegar el botón al banner (quitar radio superior del botón) */
+    .nav-btn-attached div[data-testid="stButton"] > button {
+        border-radius: 0 0 12px 12px !important;
+        border: 1.5px solid #3b82f6 !important;
+        border-top: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1795,6 +1847,7 @@ def main():
             cr_ac = st.session_state.get("creditos_acumulados", "—")
             cr_tot = st.session_state.get("creditos_totales", "—")
             st.caption(f"Cargado · {n_apr} aprobadas · {cr_ac}/{cr_tot} créditos")
+        else:
             st.warning("⚠️ Sube el historial académico primero")
 
         st.markdown("---")
@@ -2041,6 +2094,46 @@ def main():
 </div>
 """, unsafe_allow_html=True)
 
+        # Banner CTA: sólo visible cuando ambos archivos están cargados
+        if "datos_estudiante" in st.session_state:
+            _ambos_listos = "aprobadas_historial" in st.session_state
+            _desc_inicio = ("Historial y Kardex cargados — revisa el resumen del estudiante."
+                            if _ambos_listos else
+                            "Cuando hayas cargado los archivos, revisa la situación académica del estudiante.")
+            st.markdown(f"""
+<div class="nav-cta-banner" style="margin-top:20px;">
+  <div class="nav-cta-label">✅ Siguiente paso</div>
+  <div class="nav-cta-desc">{_desc_inicio}</div>
+</div>""", unsafe_allow_html=True)
+            st.markdown('<div class="nav-btn-attached">', unsafe_allow_html=True)
+            if st.button(
+                "🎓  Ver Situación Académica",
+                type="primary",
+                use_container_width=True,
+                key="btn_next_historia",
+            ):
+                st.switch_page(st.Page(_pg_historia, title="Situación Académica", icon=":material/history_edu:"))
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="divider-label">Archivos que necesitas</div>', unsafe_allow_html=True)
+        st.markdown("""
+<div class="info-row">
+  <div class="info-chip">
+    <strong>Historial académico</strong>
+    PDF oficial del historial académico del estudiante exportado desde el sistema escolar.
+  </div>
+  <div class="info-chip">
+    <strong>Kardex del estudiante</strong>
+    PDF oficial con promedio, créditos y situación académica actualizada.
+  </div>
+  <div class="info-chip">
+    <strong>Plan de estudios</strong>
+    El sistema trabaja con el plan <strong>IDeIO 2021</strong>. Verifica que ambos documentos
+    correspondan a ese plan.
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
         st.markdown('<div class="divider-label">Para comenzar, sigue estos pasos</div>', unsafe_allow_html=True)
         st.markdown("""
 <div class="step-grid">
@@ -2048,14 +2141,14 @@ def main():
   <div class="step-card">
     <span class="step-number">Paso 1</span>
     <h3>Cargar el Historial Académico</h3>
-    <p>En el panel izquierdo, sube el archivo <strong>CSV o Excel</strong> exportado del sistema escolar con
-    las materias cursadas, calificaciones y semestres.</p>
+    <p>En el panel izquierdo, sube el <strong>PDF del historial académico</strong> del estudiante.
+    El sistema extrae las materias cursadas, calificaciones y semestres.</p>
     <div class="step-hint">Panel izquierdo &rarr; Paso 1: Historial Académico</div>
   </div>
 
   <div class="step-card">
     <span class="step-number">Paso 2</span>
-    <h3>Cargar el Kardex en PDF</h3>
+    <h3>Cargar el Kardex</h3>
     <p>Sube el <strong>PDF del kardex</strong> del estudiante. El sistema extrae automáticamente
     los créditos, promedio, situación académica y datos del plan de estudios.</p>
     <div class="step-hint">Panel izquierdo &rarr; Paso 2: Kardex (PDF)</div>
@@ -2071,7 +2164,7 @@ def main():
 
   <div class="step-card">
     <span class="step-number">Paso 4</span>
-    <h3>Ver Materias Recomendadas</h3>
+    <h3>Ver Materias Candidatas</h3>
     <p>El sistema experto analiza las seriaciones, prioridades y especialidad elegida
     para sugerir las materias más adecuadas a inscribir el próximo semestre.</p>
     <div class="step-hint">Menú &rarr; Materias Candidatas para Cargar</div>
@@ -2093,25 +2186,6 @@ def main():
     <div class="step-hint">Menú &rarr; Mapa Curricular</div>
   </div>
 
-</div>
-""", unsafe_allow_html=True)
-
-        st.markdown('<div class="divider-label">Archivos que necesitas</div>', unsafe_allow_html=True)
-        st.markdown("""
-<div class="info-row">
-  <div class="info-chip">
-    <strong>Historial académico</strong>
-    Archivo CSV o Excel exportado del sistema escolar de la universidad.
-  </div>
-  <div class="info-chip">
-    <strong>Kardex del estudiante</strong>
-    PDF oficial con promedio, créditos y situación académica actualizada.
-  </div>
-  <div class="info-chip">
-    <strong>Plan de estudios</strong>
-    El sistema trabaja con el plan <strong>IDeIO 2021</strong>. Verifica que el
-    kardex corresponda a ese plan.
-  </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -3005,304 +3079,311 @@ def main():
             except Exception as e:
                 st.warning(f"Error al calcular pre-especialidades: {str(e)}")
 
-
-        # ===================================================================
-        # PESTAÑA GENERADOR DE CARGAS ACADÉMICAS
-        # ===================================================================
+        st.markdown("""
+<div class="nav-cta-banner">
+  <div class="nav-cta-label">📌 Siguiente paso</div>
+  <div class="nav-cta-desc">El sistema experto analiza seriaciones y prioridades para sugerir las mejores materias a inscribir.</div>
+</div>""", unsafe_allow_html=True)
+        st.markdown('<div class="nav-btn-attached">', unsafe_allow_html=True)
+        if st.button("🧠  Ver Materias Candidatas para Cargar", key="btn_next_experto", type="primary", use_container_width=True):
+            st.switch_page(st.Page(_pg_experto, title="Materias Candidatas para Cargar", icon=":material/psychology:"))
+        st.markdown('</div>', unsafe_allow_html=True)
 
     def _pg_experto():
-        subtab_candidatas, = st.tabs(["📌 Materias candidatas"])
+        st.divider()
 
-        with subtab_candidatas:
-            st.divider()
+        if historial_df.empty:
+            st.info("⚠️ Sube y procesa el **Historial Académico** (Paso 1 en el sidebar) para ver las materias candidatas.")
+        else:
+            # ── Preparar historial para el sistema experto ──
+            plan_estudios = str(getattr(datos, "plan_estudios", "2021ID") or "2021ID").strip()
 
-            if historial_df.empty:
-                st.info("⚠️ Sube y procesa el **Historial Académico** (Paso 1 en el sidebar) para ver las materias candidatas.")
-            else:
-                # ── Preparar historial para el sistema experto ──
-                plan_estudios = str(getattr(datos, "plan_estudios", "2021ID") or "2021ID").strip()
+            historial_aprobado = []
+            for _, row in historial_df.iterrows():
+                clave = str(row.get("clave", "")).strip().upper()
+                if not clave:
+                    continue
+                estatus = str(row.get("estatus", "")).upper()
+                ciclo = row.get("ciclo")
+                try:
+                    ciclo = int(ciclo) if pd.notna(ciclo) else 1
+                except Exception:
+                    ciclo = 1
+                cal = row.get("calificacion", 0.0)
+                cred = row.get("creditos", 0)
+                try:
+                    cal = float(cal) if pd.notna(cal) else 0.0
+                except Exception:
+                    cal = 0.0
+                try:
+                    cred = int(float(cred)) if pd.notna(cred) else 0
+                except Exception:
+                    cred = 0
+                historial_aprobado.append({
+                    "clave": clave,
+                    "ciclo": ciclo,
+                    "estatus": estatus,
+                    "calificacion": cal,
+                    "creditos": cred,
+                    "nombre": str(row.get("nombre", "")).strip(),
+                    "periodo": str(row.get("periodo", "")).strip(),
+                })
 
-                historial_aprobado = []
-                for _, row in historial_df.iterrows():
-                    clave = str(row.get("clave", "")).strip().upper()
-                    if not clave:
-                        continue
-                    estatus = str(row.get("estatus", "")).upper()
-                    ciclo = row.get("ciclo")
-                    try:
-                        ciclo = int(ciclo) if pd.notna(ciclo) else 1
-                    except Exception:
-                        ciclo = 1
-                    cal = row.get("calificacion", 0.0)
-                    cred = row.get("creditos", 0)
-                    try:
-                        cal = float(cal) if pd.notna(cal) else 0.0
-                    except Exception:
-                        cal = 0.0
-                    try:
-                        cred = int(float(cred)) if pd.notna(cred) else 0
-                    except Exception:
-                        cred = 0
-                    historial_aprobado.append({
-                        "clave": clave,
-                        "ciclo": ciclo,
-                        "estatus": estatus,
-                        "calificacion": cal,
-                        "creditos": cred,
-                        "nombre": str(row.get("nombre", "")).strip(),
-                        "periodo": str(row.get("periodo", "")).strip(),
-                    })
+            # ── Cargar mapa curricular ──
+            mapa_path = Path(__file__).parent.parent / "data" / f"mapa_curricular_{plan_estudios}_real_completo.json"
+            mapa_curricular = None
+            if mapa_path.exists():
+                try:
+                    with open(mapa_path, "r", encoding="utf-8") as f:
+                        datos_mapa = json.load(f)
+                        if isinstance(datos_mapa, dict):
+                            mapa_curricular = []
+                            for clave, info in datos_mapa.items():
+                                if isinstance(info, dict):
+                                    info["clave"] = str(clave).strip().upper()
+                                    mapa_curricular.append(info)
+                except Exception:
+                    pass
 
-                # ── Cargar mapa curricular ──
-                mapa_path = Path(__file__).parent.parent / "data" / f"mapa_curricular_{plan_estudios}_real_completo.json"
-                mapa_curricular = None
-                if mapa_path.exists():
-                    try:
-                        with open(mapa_path, "r", encoding="utf-8") as f:
-                            datos_mapa = json.load(f)
-                            if isinstance(datos_mapa, dict):
-                                mapa_curricular = []
-                                for clave, info in datos_mapa.items():
-                                    if isinstance(info, dict):
-                                        info["clave"] = str(clave).strip().upper()
-                                        mapa_curricular.append(info)
-                    except Exception:
-                        pass
+            # ── Ejecutar sistema experto ──
+            # Se ignoran materias EN_CURSO/RECURSANDO para que el sistema
+            # recomiende como si el alumno aún no hubiera cargado este semestre,
+            # permitiendo comparar la recomendación vs la carga real.
+            historial_para_experto = [
+                h for h in historial_aprobado
+                if h["estatus"] not in ("EN_CURSO", "RECURSANDO")
+            ]
+            # Modo simulación: EN_CURSO no contribuye a detección de especialidad
+            # (el semestre actual aún no ha comenzado).
+            especialidad_forzada = st.session_state.get("especialidad_forzada", None)
+            resultado = ejecutar_sistema_experto(
+                historial_academico=historial_para_experto,
+                mapa_curricular=mapa_curricular,
+                plan_estudios=plan_estudios,
+                especialidad_forzada=especialidad_forzada,
+                en_curso_para_especialidad=[],
+            )
 
-                # ── Ejecutar sistema experto ──
-                # Se ignoran materias EN_CURSO/RECURSANDO para que el sistema
-                # recomiende como si el alumno aún no hubiera cargado este semestre,
-                # permitiendo comparar la recomendación vs la carga real.
-                historial_para_experto = [
-                    h for h in historial_aprobado
-                    if h["estatus"] not in ("EN_CURSO", "RECURSANDO")
-                ]
-                # Modo simulación: EN_CURSO no contribuye a detección de especialidad
-                # (el semestre actual aún no ha comenzado).
-                especialidad_forzada = st.session_state.get("especialidad_forzada", None)
-                resultado = ejecutar_sistema_experto(
-                    historial_academico=historial_para_experto,
-                    mapa_curricular=mapa_curricular,
-                    plan_estudios=plan_estudios,
-                    especialidad_forzada=especialidad_forzada,
-                    en_curso_para_especialidad=[],
-                )
+            # Guardar para pestaña de generador de cargas
+            st.session_state.resultado_experto = resultado
 
-                # Guardar para pestaña de generador de cargas
-                st.session_state.resultado_experto = resultado
+            debug_info = resultado.get("debug", {})
+            sem_cursado = resultado.get("semestre_cursado", 0)
+            sem_objetivo = resultado.get("semestre_objetivo", 0)
+            ciclo_act  = sem_objetivo
+            esp        = resultado.get("especialidad_detectada") or None
+            elim_a     = debug_info.get("eliminadas_regla_a", 0)
+            elim_b     = debug_info.get("eliminadas_regla_b", 0)
+            elim_c     = debug_info.get("eliminadas_regla_c", 0)
+            elim_d     = debug_info.get("eliminadas_regla_d", 0)
+            elim_e     = debug_info.get("eliminadas_regla_e", 0)
+            ini_count  = debug_info.get("candidatas_iniciales_count", 0)
 
-                debug_info = resultado.get("debug", {})
-                sem_cursado = resultado.get("semestre_cursado", 0)
-                sem_objetivo = resultado.get("semestre_objetivo", 0)
-                ciclo_act  = sem_objetivo
-                esp        = resultado.get("especialidad_detectada") or None
-                elim_a     = debug_info.get("eliminadas_regla_a", 0)
-                elim_b     = debug_info.get("eliminadas_regla_b", 0)
-                elim_c     = debug_info.get("eliminadas_regla_c", 0)
-                elim_d     = debug_info.get("eliminadas_regla_d", 0)
-                elim_e     = debug_info.get("eliminadas_regla_e", 0)
-                ini_count  = debug_info.get("candidatas_iniciales_count", 0)
+            # ── Métricas ──
+            st.subheader("📊 Resultado del Análisis")
+            col_met1, col_met2, col_met3 = st.columns(3)
+            with col_met1:
+                st.metric("Semestre objetivo", f"{sem_objetivo}", delta=f"Cursando sem. {sem_cursado}")
+            with col_met2:
+                st.metric("Materias candidatas", resultado.get("candidatas_count", 0))
+            with col_met3:
+                st.metric("Analizadas inicialmente", ini_count)
 
-                # ── Métricas ──
-                st.subheader("📊 Resultado del Análisis")
-                col_met1, col_met2, col_met3 = st.columns(3)
-                with col_met1:
-                    st.metric("Semestre objetivo", f"{sem_objetivo}", delta=f"Cursando sem. {sem_cursado}")
-                with col_met2:
-                    st.metric("Materias candidatas", resultado.get("candidatas_count", 0))
-                with col_met3:
-                    st.metric("Analizadas inicialmente", ini_count)
+            # ── Tabla única de candidatas con secciones de color ──
+            candidatas_detalles = resultado.get("candidatas_detalles", [])
+            if candidatas_detalles:
+                st.subheader("Materias recomendadas para el siguiente semestre")
 
-                # ── Tabla única de candidatas con secciones de color ──
-                candidatas_detalles = resultado.get("candidatas_detalles", [])
-                if candidatas_detalles:
-                    st.subheader("Materias recomendadas para el siguiente semestre")
+                df_candidatas = pd.DataFrame(candidatas_detalles)
 
-                    df_candidatas = pd.DataFrame(candidatas_detalles)
-
-                    if "prerequisitos" in df_candidatas.columns:
-                        df_candidatas["prerequisitos"] = df_candidatas["prerequisitos"].apply(
-                            lambda x: ", ".join(x) if isinstance(x, list) and x else "—"
-                        )
-
-                    _nivel_config = {
-                        1: {"color": "#b71c1c", "bg": "#ffebee", "titulo": "⚠️ Prerequisito faltante retroactivo", "desc": "Ya aprobaste la materia sucesora pero aún falta este prerequisito"},
-                        2: {"color": "#d32f2f", "bg": "#fdecea", "titulo": "🔁 Materias reprobadas", "desc": "Pendientes de recursar para poder avanzar"},
-                        3: {"color": "#ef6c00", "bg": "#fff3e0", "titulo": "📚 Pendientes de ciclos anteriores", "desc": "Cierra ciclos atrasados — ordenadas del ciclo más antiguo al más reciente"},
-                        4: {"color": "#1565c0", "bg": "#e3f2fd", "titulo": "✅ Ciclo actual", "desc": "Materias que corresponden a tu ciclo objetivo — progresión natural"},
-                        5: {"color": "#6a1b9a", "bg": "#f3e5f5", "titulo": "🎯 Elección libre", "desc": "Electivas disponibles (línea de especialidad no seleccionada)"},
-                        6: {"color": "#00695c", "bg": "#e0f2f1", "titulo": "🌐 Co-curriculares pendientes", "desc": "Inglés u otras actividades co-curriculares que aún te faltan"},
-                    }
-
-                    niveles_presentes = sorted(df_candidatas["prioridad"].unique()) if "prioridad" in df_candidatas.columns else []
-
-                    total_creditos = 0
-                    total_basicas = 0
-                    total_optativas = 0
-
-                    # Construir tabla HTML
-                    _col_w = ["90px", "auto", "80px", "80px", "120px", "130px", "auto"]
-                    _th = "padding:10px 12px; text-align:left; border-right:2px solid #555; white-space:nowrap;"
-                    _th_c = "padding:10px 8px; text-align:center; border-right:2px solid #555; white-space:nowrap;"
-                    html = [
-                        '<table style="width:100%; border-collapse:collapse; font-size:13px; '
-                        'font-family: Source Sans Pro, sans-serif; border:1px solid #ccc;">',
-                        '<colgroup>',
-                        *[f'<col style="width:{w}">' for w in _col_w],
-                        '</colgroup>',
-                        '<thead><tr style="background:#262730; color:#fafafa;">',
-                        f'<th style="{_th}">Clave</th>',
-                        f'<th style="{_th}">Nombre</th>',
-                        f'<th style="{_th_c}">Semestre</th>',
-                        f'<th style="{_th_c}">Créditos</th>',
-                        f'<th style="{_th}">Categoría</th>',
-                        f'<th style="{_th}">Prerequisitos</th>',
-                        f'<th style="padding:10px 12px; text-align:left;">Razón</th>',
-                        '</tr></thead><tbody>',
-                    ]
-
-                    for nivel_num in niveles_presentes:
-                        df_nivel = df_candidatas[df_candidatas["prioridad"] == nivel_num]
-                        if df_nivel.empty:
-                            continue
-
-                        cfg = _nivel_config.get(nivel_num, {"color": "#757575", "bg": "#f5f5f5", "titulo": f"Nivel {nivel_num}", "desc": ""})
-                        n_mat = len(df_nivel)
-                        n_cred = int(df_nivel["creditos"].sum())
-                        total_creditos += n_cred
-                        total_basicas += len(df_nivel[df_nivel["categoria"] == "BASICA"])
-                        total_optativas += len(df_nivel[df_nivel["categoria"] != "BASICA"])
-
-                        # Fila separadora de sección (banda de color sólido)
-                        html.append(
-                            f'<tr style="background:{cfg["color"]}; color:white;">'
-                            f'<td colspan="7" style="padding:9px 12px; font-weight:700; font-size:13px; '
-                            f'border-top:3px solid rgba(0,0,0,0.15); letter-spacing:0.02em;">'
-                            f'{cfg["titulo"]}'
-                            f'<span style="font-weight:400; margin-left:10px; font-size:12px; opacity:0.9;">'
-                            f'— {n_mat} materia{"s" if n_mat != 1 else ""} · {n_cred} créditos'
-                            f'</span>'
-                            f'<span style="font-weight:300; margin-left:14px; font-size:11px; opacity:0.75; font-style:italic;">'
-                            f'{cfg["desc"]}'
-                            f'</span>'
-                            f'</td></tr>'
-                        )
-
-                        # Filas de materias con separador de columnas visible
-                        _td = "padding:8px 12px; border-right:2px solid #ccc; vertical-align:top;"
-                        _td_c = "padding:8px 8px; border-right:2px solid #ccc; text-align:center; vertical-align:top;"
-                        for idx, (_, row) in enumerate(df_nivel.iterrows()):
-                            prereqs = row.get("prerequisitos", "—")
-                            razon = row.get("razon", "")
-                            cat_display = str(row.get("categoria", "")).replace("_", " ").title()
-                            # Alternate row shade for readability
-                            row_bg = cfg["bg"] if idx % 2 == 0 else "white"
-                            html.append(
-                                f'<tr style="background:{row_bg}; border-bottom:1px solid #d0d0d0;">'
-                                f'<td style="{_td} font-weight:700; font-family:monospace; font-size:12px;">{row["clave"]}</td>'
-                                f'<td style="{_td}">{row["nombre"]}</td>'
-                                f'<td style="{_td_c}">{row["ciclo"]}</td>'
-                                f'<td style="{_td_c}">{row["creditos"]}</td>'
-                                f'<td style="{_td} font-size:12px; color:#555;">{cat_display}</td>'
-                                f'<td style="{_td} font-size:12px; font-family:monospace; color:#1a237e;">{prereqs}</td>'
-                                f'<td style="padding:8px 10px; font-size:12px; color:#444; font-style:italic; vertical-align:top;">{razon}</td>'
-                                f'</tr>'
-                            )
-
-                    html.append('</tbody></table>')
-                    st.markdown("".join(html), unsafe_allow_html=True)
-
-                    # Resumen
-                    st.markdown("")
-                    col_est1, col_est2, col_est3 = st.columns(3)
-                    with col_est1:
-                        st.metric("Créditos totales", total_creditos)
-                    with col_est2:
-                        st.metric("Materias básicas", total_basicas)
-                    with col_est3:
-                        st.metric("Materias optativas", total_optativas)
-                else:
-                    st.info("No se encontraron materias candidatas disponibles en este momento.")
-
-                # ── Explicación de la lógica (debajo de la tabla) ──
-                st.divider()
-                with st.expander("¿Cómo se eligieron estas materias?", expanded=False):
-
-                    # Resumen breve del proceso
-                    final_count = resultado.get("candidatas_count", 0)
-                    st.markdown(
-                        f"Se analizaron **{ini_count}** materias candidatas y después de aplicar "
-                        f"las reglas de seriación quedaron **{final_count}**. "
-                        f"A continuación se explica por qué se recomienda cada una:"
+                if "prerequisitos" in df_candidatas.columns:
+                    df_candidatas["prerequisitos"] = df_candidatas["prerequisitos"].apply(
+                        lambda x: ", ".join(x) if isinstance(x, list) and x else "—"
                     )
-                    st.markdown("")
 
-                    # Colores por nivel de prioridad
-                    _colores_nivel = {
-                        1: "#ffebee",   # rojo claro — prereq faltante retroactivo
-                        2: "#fdecea",   # rojo suave — reprobadas
-                        3: "#fff3e0",   # naranja claro — ciclos anteriores
-                        4: "#e3f2fd",   # azul claro — ciclo actual
-                        5: "#f3e5f5",   # morado claro — elección libre
-                        6: "#e0f2f1",   # verde agua — co-curriculares
-                    }
+                _nivel_config = {
+                    1: {"color": "#b71c1c", "bg": "#ffebee", "titulo": "⚠️ Prerequisito faltante retroactivo", "desc": "Ya aprobaste la materia sucesora pero aún falta este prerequisito"},
+                    2: {"color": "#d32f2f", "bg": "#fdecea", "titulo": "🔁 Materias reprobadas", "desc": "Pendientes de recursar para poder avanzar"},
+                    3: {"color": "#ef6c00", "bg": "#fff3e0", "titulo": "📚 Pendientes de ciclos anteriores", "desc": "Cierra ciclos atrasados — ordenadas del ciclo más antiguo al más reciente"},
+                    4: {"color": "#1565c0", "bg": "#e3f2fd", "titulo": "✅ Ciclo actual", "desc": "Materias que corresponden a tu ciclo objetivo — progresión natural"},
+                    5: {"color": "#6a1b9a", "bg": "#f3e5f5", "titulo": "🎯 Elección libre", "desc": "Electivas disponibles (línea de especialidad no seleccionada)"},
+                    6: {"color": "#00695c", "bg": "#e0f2f1", "titulo": "🌐 Co-curriculares pendientes", "desc": "Inglés u otras actividades co-curriculares que aún te faltan"},
+                }
 
-                    # Agrupar candidatas por (nivel, razon)
-                    from collections import OrderedDict
-                    grupos = OrderedDict()
-                    for det in candidatas_detalles:
-                        key = (det.get("prioridad", 99), det.get("nivel", "Otras"), det.get("razon", ""))
-                        if key not in grupos:
-                            grupos[key] = []
-                        grupos[key].append(det)
+                niveles_presentes = sorted(df_candidatas["prioridad"].unique()) if "prioridad" in df_candidatas.columns else []
 
-                    for (prio, nivel_nombre, razon), materias_grupo in grupos.items():
-                        color = _colores_nivel.get(prio, "#f5f5f5")
+                total_creditos = 0
+                total_basicas = 0
+                total_optativas = 0
 
-                        if len(materias_grupo) == 1:
-                            m = materias_grupo[0]
-                            st.markdown(
-                                f"<div style='background:{color}; padding:10px 14px; "
-                                f"border-radius:8px; margin-bottom:8px; border-left:4px solid {color.replace('e','9').replace('f','b')};'>"
-                                f"<strong>{m['clave']} — {m['nombre']}</strong> "
-                                f"<span style='color:#666; font-size:0.9em;'>(Ciclo {m['ciclo']} · {m['creditos']} cr)</span><br>"
-                                f"<span style='font-size:0.92em;'>{razon}</span>"
-                                f"</div>",
-                                unsafe_allow_html=True
-                            )
-                        else:
-                            lista_html = "".join(
-                                f"<li><strong>{m['clave']}</strong> — {m['nombre']} "
-                                f"<span style='color:#666; font-size:0.9em;'>(Ciclo {m['ciclo']} · {m['creditos']} cr)</span></li>"
-                                for m in materias_grupo
-                            )
-                            st.markdown(
-                                f"<div style='background:{color}; padding:10px 14px; "
-                                f"border-radius:8px; margin-bottom:8px; border-left:4px solid {color.replace('e','9').replace('f','b')};'>"
-                                f"<strong>{nivel_nombre}</strong> — "
-                                f"<span style='font-size:0.92em;'>{razon}</span>"
-                                f"<ul style='margin:6px 0 2px 0;'>{lista_html}</ul>"
-                                f"</div>",
-                                unsafe_allow_html=True
-                            )
+                # Construir tabla HTML
+                _col_w = ["90px", "auto", "80px", "80px", "120px", "130px", "auto"]
+                _th = "padding:10px 12px; text-align:left; border-right:2px solid #555; white-space:nowrap;"
+                _th_c = "padding:10px 8px; text-align:center; border-right:2px solid #555; white-space:nowrap;"
+                html = [
+                    '<table style="width:100%; border-collapse:collapse; font-size:13px; '
+                    'font-family: Source Sans Pro, sans-serif; border:1px solid #ccc;">',
+                    '<colgroup>',
+                    *[f'<col style="width:{w}">' for w in _col_w],
+                    '</colgroup>',
+                    '<thead><tr style="background:#262730; color:#fafafa;">',
+                    f'<th style="{_th}">Clave</th>',
+                    f'<th style="{_th}">Nombre</th>',
+                    f'<th style="{_th_c}">Semestre</th>',
+                    f'<th style="{_th_c}">Créditos</th>',
+                    f'<th style="{_th}">Categoría</th>',
+                    f'<th style="{_th}">Prerequisitos</th>',
+                    f'<th style="padding:10px 12px; text-align:left;">Razón</th>',
+                    '</tr></thead><tbody>',
+                ]
 
-                    # Resumen de filtros aplicados
-                    filtros_activos = []
-                    if elim_a > 0: filtros_activos.append(f"Prerequisitos no cumplidos: -{elim_a}")
-                    if elim_b > 0: filtros_activos.append(f"Cadenas de seriación: -{elim_b}")
-                    if elim_c > 0: filtros_activos.append(f"Cuota de Elección Libre: -{elim_c}")
-                    if elim_d > 0: filtros_activos.append(f"Pre-especialidad ({esp or 'detectada'}): -{elim_d}")
-                    if elim_e > 0: filtros_activos.append(f"Prácticas pre-especialidad: -{elim_e}")
-                    if filtros_activos:
-                        st.markdown("")
-                        st.markdown(
-                            "**Materias descartadas:** " + " · ".join(filtros_activos)
+                for nivel_num in niveles_presentes:
+                    df_nivel = df_candidatas[df_candidatas["prioridad"] == nivel_num]
+                    if df_nivel.empty:
+                        continue
+
+                    cfg = _nivel_config.get(nivel_num, {"color": "#757575", "bg": "#f5f5f5", "titulo": f"Nivel {nivel_num}", "desc": ""})
+                    n_mat = len(df_nivel)
+                    n_cred = int(df_nivel["creditos"].sum())
+                    total_creditos += n_cred
+                    total_basicas += len(df_nivel[df_nivel["categoria"] == "BASICA"])
+                    total_optativas += len(df_nivel[df_nivel["categoria"] != "BASICA"])
+
+                    # Fila separadora de sección (banda de color sólido)
+                    html.append(
+                        f'<tr style="background:{cfg["color"]}; color:white;">'
+                        f'<td colspan="7" style="padding:9px 12px; font-weight:700; font-size:13px; '
+                        f'border-top:3px solid rgba(0,0,0,0.15); letter-spacing:0.02em;">'
+                        f'{cfg["titulo"]}'
+                        f'<span style="font-weight:400; margin-left:10px; font-size:12px; opacity:0.9;">'
+                        f'— {n_mat} materia{"s" if n_mat != 1 else ""} · {n_cred} créditos'
+                        f'</span>'
+                        f'<span style="font-weight:300; margin-left:14px; font-size:11px; opacity:0.75; font-style:italic;">'
+                        f'{cfg["desc"]}'
+                        f'</span>'
+                        f'</td></tr>'
+                    )
+
+                    # Filas de materias con separador de columnas visible
+                    _td = "padding:8px 12px; border-right:2px solid #ccc; vertical-align:top;"
+                    _td_c = "padding:8px 8px; border-right:2px solid #ccc; text-align:center; vertical-align:top;"
+                    for idx, (_, row) in enumerate(df_nivel.iterrows()):
+                        prereqs = row.get("prerequisitos", "—")
+                        razon = row.get("razon", "")
+                        cat_display = str(row.get("categoria", "")).replace("_", " ").title()
+                        # Alternate row shade for readability
+                        row_bg = cfg["bg"] if idx % 2 == 0 else "white"
+                        html.append(
+                            f'<tr style="background:{row_bg}; border-bottom:1px solid #d0d0d0;">'
+                            f'<td style="{_td} font-weight:700; font-family:monospace; font-size:12px;">{row["clave"]}</td>'
+                            f'<td style="{_td}">{row["nombre"]}</td>'
+                            f'<td style="{_td_c}">{row["ciclo"]}</td>'
+                            f'<td style="{_td_c}">{row["creditos"]}</td>'
+                            f'<td style="{_td} font-size:12px; color:#555;">{cat_display}</td>'
+                            f'<td style="{_td} font-size:12px; font-family:monospace; color:#1a237e;">{prereqs}</td>'
+                            f'<td style="padding:8px 10px; font-size:12px; color:#444; font-style:italic; vertical-align:top;">{razon}</td>'
+                            f'</tr>'
                         )
 
+                html.append('</tbody></table>')
+                st.markdown("".join(html), unsafe_allow_html=True)
 
-    # ===================================================================
-    # PESTAÑA 1: RESUMEN GENERAL
-    # ===================================================================
+                # Resumen
+                st.markdown("")
+                col_est1, col_est2, col_est3 = st.columns(3)
+                with col_est1:
+                    st.metric("Créditos totales", total_creditos)
+                with col_est2:
+                    st.metric("Materias básicas", total_basicas)
+                with col_est3:
+                    st.metric("Materias optativas", total_optativas)
+            else:
+                st.info("No se encontraron materias candidatas disponibles en este momento.")
+
+            # ── Explicación de la lógica (debajo de la tabla) ──
+            st.divider()
+            with st.expander("¿Cómo se eligieron estas materias?", expanded=False):
+
+                # Resumen breve del proceso
+                final_count = resultado.get("candidatas_count", 0)
+                st.markdown(
+                    f"Se analizaron **{ini_count}** materias candidatas y después de aplicar "
+                    f"las reglas de seriación quedaron **{final_count}**. "
+                    f"A continuación se explica por qué se recomienda cada una:"
+                )
+                st.markdown("")
+
+                # Colores por nivel de prioridad
+                _colores_nivel = {
+                    1: "#ffebee",   # rojo claro — prereq faltante retroactivo
+                    2: "#fdecea",   # rojo suave — reprobadas
+                    3: "#fff3e0",   # naranja claro — ciclos anteriores
+                    4: "#e3f2fd",   # azul claro — ciclo actual
+                    5: "#f3e5f5",   # morado claro — elección libre
+                    6: "#e0f2f1",   # verde agua — co-curriculares
+                }
+
+                # Agrupar candidatas por (nivel, razon)
+                from collections import OrderedDict
+                grupos = OrderedDict()
+                for det in candidatas_detalles:
+                    key = (det.get("prioridad", 99), det.get("nivel", "Otras"), det.get("razon", ""))
+                    if key not in grupos:
+                        grupos[key] = []
+                    grupos[key].append(det)
+
+                for (prio, nivel_nombre, razon), materias_grupo in grupos.items():
+                    color = _colores_nivel.get(prio, "#f5f5f5")
+
+                    if len(materias_grupo) == 1:
+                        m = materias_grupo[0]
+                        st.markdown(
+                            f"<div style='background:{color}; padding:10px 14px; "
+                            f"border-radius:8px; margin-bottom:8px; border-left:4px solid {color.replace('e','9').replace('f','b')};'>"
+                            f"<strong>{m['clave']} — {m['nombre']}</strong> "
+                            f"<span style='color:#666; font-size:0.9em;'>(Ciclo {m['ciclo']} · {m['creditos']} cr)</span><br>"
+                            f"<span style='font-size:0.92em;'>{razon}</span>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        lista_html = "".join(
+                            f"<li><strong>{m['clave']}</strong> — {m['nombre']} "
+                            f"<span style='color:#666; font-size:0.9em;'>(Ciclo {m['ciclo']} · {m['creditos']} cr)</span></li>"
+                            for m in materias_grupo
+                        )
+                        st.markdown(
+                            f"<div style='background:{color}; padding:10px 14px; "
+                            f"border-radius:8px; margin-bottom:8px; border-left:4px solid {color.replace('e','9').replace('f','b')};'>"
+                            f"<strong>{nivel_nombre}</strong> — "
+                            f"<span style='font-size:0.92em;'>{razon}</span>"
+                            f"<ul style='margin:6px 0 2px 0;'>{lista_html}</ul>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+
+                # Resumen de filtros aplicados
+                filtros_activos = []
+                if elim_a > 0: filtros_activos.append(f"Prerequisitos no cumplidos: -{elim_a}")
+                if elim_b > 0: filtros_activos.append(f"Cadenas de seriación: -{elim_b}")
+                if elim_c > 0: filtros_activos.append(f"Cuota de Elección Libre: -{elim_c}")
+                if elim_d > 0: filtros_activos.append(f"Pre-especialidad ({esp or 'detectada'}): -{elim_d}")
+                if elim_e > 0: filtros_activos.append(f"Prácticas pre-especialidad: -{elim_e}")
+                if filtros_activos:
+                    st.markdown("")
+                    st.markdown(
+                        "**Materias descartadas:** " + " · ".join(filtros_activos)
+                    )
+
+        st.markdown("""
+<div class="nav-cta-banner">
+  <div class="nav-cta-label">📅 Siguiente paso</div>
+  <div class="nav-cta-desc">Genera combinaciones óptimas de materias para el próximo semestre sin choques de horario.</div>
+</div>""", unsafe_allow_html=True)
+        st.markdown('<div class="nav-btn-attached">', unsafe_allow_html=True)
+        if st.button("📅  Ver Generador de Cargas", key="btn_next_cargas", type="primary", use_container_width=True):
+            st.switch_page(st.Page(_pg_cargas, title="Generador de Cargas", icon=":material/calendar_month:"))
+        st.markdown('</div>', unsafe_allow_html=True)
 
     def _pg_cargas():
         st.header("📅 Generador de Cargas Académicas")
@@ -3704,10 +3785,15 @@ def main():
                                             use_container_width=True, hide_index=True
                                         )
 
-
-    # ===================================================================
-    # PESTAÑA MAPA CURRICULAR: Esquema por semestre
-    # ===================================================================
+        st.markdown("""
+<div class="nav-cta-banner">
+  <div class="nav-cta-label">🗺️ Siguiente paso</div>
+  <div class="nav-cta-desc">Visualiza el avance del estudiante sobre el mapa oficial del plan IDeIO 2021.</div>
+</div>""", unsafe_allow_html=True)
+        st.markdown('<div class="nav-btn-attached">', unsafe_allow_html=True)
+        if st.button("🗺️  Ver Mapa Curricular", key="btn_next_mapa", type="primary", use_container_width=True):
+            st.switch_page(st.Page(_pg_mapa, title="Mapa Curricular", icon=":material/map:"))
+        st.markdown('</div>', unsafe_allow_html=True)
 
     def _pg_mapa():
         st.header("📋 Mapa Curricular por Semestre")
@@ -4012,9 +4098,15 @@ def main():
                 hide_index=True,
             )
 
-    # ===================================================================
-    # PESTAÑA PRUEBAS: Diagnóstico de captura de datos
-    # ===================================================================
+        st.markdown("""
+<div class="nav-cta-banner">
+  <div class="nav-cta-label">🔬 Siguiente paso</div>
+  <div class="nav-cta-desc">Revisa el diagnóstico de captura para validar que el sistema leyó correctamente los datos.</div>
+</div>""", unsafe_allow_html=True)
+        st.markdown('<div class="nav-btn-attached">', unsafe_allow_html=True)
+        if st.button("🔬  Ver Diagnóstico de Datos", key="btn_next_pruebas", type="primary", use_container_width=True):
+            st.switch_page(st.Page(_pg_pruebas, title="Pruebas", icon=":material/science:"))
+        st.markdown('</div>', unsafe_allow_html=True)
 
     def _pg_pruebas():
         st.header("🔬 Diagnóstico de captura de datos")
@@ -4151,9 +4243,15 @@ def main():
         else:
             st.success("✅ Todas las materias del historial están en el mapa curricular.")
 
-    # ===================================================================
-    # PESTAÑA OFERTA & CANDIDATAS
-    # ===================================================================
+        st.markdown("""
+<div class="nav-cta-banner">
+  <div class="nav-cta-label">📊 Siguiente paso</div>
+  <div class="nav-cta-desc">Explora la oferta académica disponible y los horarios de las materias candidatas.</div>
+</div>""", unsafe_allow_html=True)
+        st.markdown('<div class="nav-btn-attached">', unsafe_allow_html=True)
+        if st.button("📊  Ver Oferta & Candidatas", key="btn_next_oferta", type="primary", use_container_width=True):
+            st.switch_page(st.Page(_pg_oferta, title="Oferta & Candidatas", icon=":material/insights:"))
+        st.markdown('</div>', unsafe_allow_html=True)
 
     def _pg_oferta():
         st.header("📊 Oferta Académica y Disponibilidad")
@@ -4609,226 +4707,15 @@ def main():
                                 _nm_cc = cand_lookup2.get(_cc, {}).get("nombre", _cc)
                                 st.markdown(f"- `{_cc}` — {_nm_cc} (choca permanentemente con {_siempre_con[_cc]} materia(s))")
 
-    # ═══════════════════════════════════════════════════════════════════════
-    #  AGENTE ASESOR — Chat persistente (visible en todas las pestañas)
-    # ═══════════════════════════════════════════════════════════════════════
-
-    # ── Página de bienvenida ──────────────────────────────────────────────────
-    def _pg_inicio():
-        st.markdown("""
-<style>
-.intro-hero {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%);
-    border-radius: 12px;
-    padding: 48px 40px 40px 40px;
-    margin-bottom: 32px;
-    color: #ffffff;
-}
-.intro-hero h1 {
-    font-size: 2rem;
-    font-weight: 700;
-    margin: 0 0 10px 0;
-    letter-spacing: -0.5px;
-    color: #ffffff;
-}
-.intro-hero p {
-    font-size: 1.05rem;
-    color: #c9d6e3;
-    margin: 0;
-    line-height: 1.7;
-    max-width: 680px;
-}
-.intro-badge {
-    display: inline-block;
-    background: rgba(255,255,255,0.12);
-    border: 1px solid rgba(255,255,255,0.2);
-    border-radius: 20px;
-    padding: 4px 14px;
-    font-size: 0.75rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #a8c4e0;
-    margin-bottom: 18px;
-}
-.step-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 16px;
-    margin-bottom: 32px;
-}
-.step-card {
-    background: #ffffff;
-    border: 1px solid #e8ecf0;
-    border-radius: 10px;
-    padding: 22px 22px 18px 22px;
-    position: relative;
-}
-.step-number {
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: #0f3460;
-    background: #eaf0fb;
-    border-radius: 4px;
-    padding: 2px 8px;
-    display: inline-block;
-    margin-bottom: 10px;
-}
-.step-card h3 {
-    font-size: 0.98rem;
-    font-weight: 700;
-    color: #1a1a2e;
-    margin: 0 0 7px 0;
-}
-.step-card p {
-    font-size: 0.875rem;
-    color: #555e6e;
-    margin: 0;
-    line-height: 1.6;
-}
-.step-card .step-hint {
-    font-size: 0.78rem;
-    color: #0f3460;
-    font-weight: 600;
-    margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px solid #eef0f4;
-}
-.info-row {
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-bottom: 28px;
-}
-.info-chip {
-    background: #f4f6fa;
-    border: 1px solid #dde2ec;
-    border-radius: 8px;
-    padding: 12px 18px;
-    font-size: 0.85rem;
-    color: #333;
-    flex: 1;
-    min-width: 160px;
-}
-.info-chip strong {
-    display: block;
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #0f3460;
-    margin-bottom: 3px;
-}
-.divider-label {
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: #8a92a6;
-    margin: 28px 0 14px 0;
-}
-</style>
-
-<div class="intro-hero">
-    <div class="intro-badge">Universidad del Caribe &nbsp;·&nbsp; IDeIO 2021</div>
-    <h1>Asesor de Trayectoria Académica</h1>
-    <p>
-        Herramienta de apoyo a la tutoría que analiza el historial del estudiante,
-        detecta alertas académicas, recomienda materias para el próximo semestre
-        y genera combinaciones de carga optimizadas según su disponibilidad horaria.
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
-        st.markdown('<div class="divider-label">Para comenzar, sigue estos pasos</div>', unsafe_allow_html=True)
-        st.markdown("""
-<div class="step-grid">
-
-  <div class="step-card">
-    <span class="step-number">Paso 1</span>
-    <h3>Cargar el Historial Académico</h3>
-    <p>En el panel izquierdo, sube el archivo <strong>CSV o Excel</strong> exportado del sistema escolar con
-    las materias cursadas, calificaciones y semestres.</p>
-    <div class="step-hint">Panel izquierdo &rarr; Paso 1: Historial Académico</div>
-  </div>
-
-  <div class="step-card">
-    <span class="step-number">Paso 2</span>
-    <h3>Cargar el Kardex en PDF</h3>
-    <p>Sube el <strong>PDF del kardex</strong> del estudiante. El sistema extrae automáticamente
-    los créditos, promedio, situación académica y datos del plan de estudios.</p>
-    <div class="step-hint">Panel izquierdo &rarr; Paso 2: Kardex (PDF)</div>
-  </div>
-
-  <div class="step-card">
-    <span class="step-number">Paso 3</span>
-    <h3>Revisar la Situación Académica</h3>
-    <p>Consulta el resumen del estudiante: alertas activas, créditos acumulados,
-    índice de reprobación y proyección de egreso.</p>
-    <div class="step-hint">Menú &rarr; Situación Académica</div>
-  </div>
-
-  <div class="step-card">
-    <span class="step-number">Paso 4</span>
-    <h3>Ver Materias Recomendadas</h3>
-    <p>El sistema experto analiza las seriaciones, prioridades y especialidad elegida
-    para sugerir las materias más adecuadas a inscribir el próximo semestre.</p>
-    <div class="step-hint">Menú &rarr; Materias Candidatas para Cargar</div>
-  </div>
-
-  <div class="step-card">
-    <span class="step-number">Paso 5</span>
-    <h3>Generar Combinaciones de Carga</h3>
-    <p>Con la oferta académica disponible y tu horario libre, el generador propone
-    hasta tres combinaciones sin choques de horario, ordenadas por prioridad.</p>
-    <div class="step-hint">Menú &rarr; Generador de Cargas</div>
-  </div>
-
-  <div class="step-card">
-    <span class="step-number">Opcional</span>
-    <h3>Explorar el Mapa Curricular</h3>
-    <p>Visualiza el avance del estudiante sobre el mapa oficial del plan 2021ID,
-    con estado por materia: aprobada, pendiente, en curso o reprobada.</p>
-    <div class="step-hint">Menú &rarr; Mapa Curricular</div>
-  </div>
-
-</div>
-""", unsafe_allow_html=True)
-
-        st.markdown('<div class="divider-label">Archivos que necesitas</div>', unsafe_allow_html=True)
-        st.markdown("""
-<div class="info-row">
-  <div class="info-chip">
-    <strong>Historial académico</strong>
-    Archivo CSV o Excel exportado del sistema escolar de la universidad.
-  </div>
-  <div class="info-chip">
-    <strong>Kardex del estudiante</strong>
-    PDF oficial con promedio, créditos y situación académica actualizada.
-  </div>
-  <div class="info-chip">
-    <strong>Plan de estudios</strong>
-    El sistema trabaja con el plan <strong>IDeIO 2021</strong>. Verifica que el
-    kardex corresponda a ese plan.
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-        st.info(
-            "Si tienes dudas mientras usas el sistema, el asistente de chat (esquina inferior derecha) "
-            "puede responder preguntas sobre cualquier sección.",
-            icon=":material/help:",
-        )
-
     # ── Configurar navegación por sidebar ────────────────────────────────────
     pg = st.navigation([
-        st.Page(_pg_inicio,   title="Cómo usar el sistema",             icon=":material/home:", default=True),
-        st.Page(_pg_historia, title="Situación Académica",              icon=":material/history_edu:"),
+        st.Page(_pg_inicio,   title="Cómo usar el sistema",            icon=":material/home:"),
+        st.Page(_pg_historia, title="Situación Académica",             icon=":material/history_edu:"),
         st.Page(_pg_experto,  title="Materias Candidatas para Cargar", icon=":material/psychology:"),
-        st.Page(_pg_cargas,   title="Generador de Cargas", icon=":material/calendar_month:"),
-        st.Page(_pg_mapa,     title="Mapa Curricular",     icon=":material/map:"),
-        st.Page(_pg_pruebas,  title="Pruebas",             icon=":material/science:"),
-        st.Page(_pg_oferta,   title="Oferta & Candidatas", icon=":material/insights:"),
+        st.Page(_pg_cargas,   title="Generador de Cargas",             icon=":material/calendar_month:"),
+        st.Page(_pg_mapa,     title="Mapa Curricular",                 icon=":material/map:"),
+        st.Page(_pg_pruebas,  title="Pruebas",                         icon=":material/science:"),
+        st.Page(_pg_oferta,   title="Oferta & Candidatas",             icon=":material/insights:"),
     ], position="sidebar")
     pg.run()
 
