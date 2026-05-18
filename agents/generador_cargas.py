@@ -301,6 +301,7 @@ def generar_cargas_nsga3(
     poblacion_size: int = 100,
     generaciones: int = 50,
     n_resultados: int = 3,
+    modo_prioridad: str = "balanceado",
 ) -> List[Dict]:
     """
     Genera cargas académicas optimizadas usando NSGA-III.
@@ -429,9 +430,16 @@ def generar_cargas_nsga3(
         score_comp = objetivo_compacidad(ind)
         score_cant = objetivo_cantidad(ind, materias_deseadas)
 
-        # Score combinado ponderado (para ranking final)
-        # Pesos: prioridad 40%, cantidad de materias 35%, compacidad 25%
-        score_total = 0.40 * score_pri + 0.35 * (1 - score_cant) + 0.25 * (1 - score_comp)
+        # Score combinado ponderado según modo seleccionado
+        if modo_prioridad == "compacidad":
+            # Prioridad 25%, cantidad 15%, compacidad 60%
+            score_total = 0.25 * score_pri + 0.15 * (1 - score_cant) + 0.60 * (1 - score_comp)
+        elif modo_prioridad == "num_materias":
+            # Prioridad 25%, cantidad 60%, compacidad 15%
+            score_total = 0.25 * score_pri + 0.60 * (1 - score_cant) + 0.15 * (1 - score_comp)
+        else:  # balanceado
+            # Prioridad 40%, cantidad 35%, compacidad 25%
+            score_total = 0.40 * score_pri + 0.35 * (1 - score_cant) + 0.25 * (1 - score_comp)
 
         evaluados.append({
             "secciones": sorted(ind, key=lambda s: (s["prioridad"], s["ciclo"])),

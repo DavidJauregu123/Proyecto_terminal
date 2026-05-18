@@ -1,5 +1,5 @@
 """
-Agente Asesor Curricular — LangChain + LangGraph + OpenRouter (DeepSeek V3).
+Agente Asesor Curricular — LangChain + LangGraph + Gemini.
 12 tools inteligentes con análisis pre-computado para asesor curricular.
 """
 
@@ -365,7 +365,7 @@ def resumen_estudiante() -> str:
     # Riesgo — combinar checks propios + alertas del procesador
     riesgos = []
     if es_condicional:
-        riesgos.append("Alumno CONDICIONAL (máx 4 materias)")
+        riesgos.append("Alumno CONDICIONAL (carga fija: exactamente 3 materias)")
     if any("TERCERA" in r for r in reprobadas_detalle):
         riesgos.append("Tiene materias en TERCERA OPORTUNIDAD")
     if any("BAJA" in r for r in reprobadas_detalle):
@@ -767,7 +767,13 @@ def consultar_historial(filtro: str = "") -> str:
 
     # Con filtro: mostrar listado completo + analisis
     f_upper = filtro.upper().strip()
-    if f_upper == "RECURSANDO":
+    if f_upper == "REPROBADA":
+        # Usar historial_calculo (último estado por materia) para no contar materias
+        # que el alumno reprobó pero luego aprobó
+        _hc = _session_ref.get("historial_calculo")
+        df_canon = _hc if (_hc is not None and hasattr(_hc, "empty") and not _hc.empty) else df
+        df_f = df_canon[df_canon["estatus"].str.upper() == "REPROBADA"]
+    elif f_upper == "RECURSANDO":
         df_f = df[df["estatus"].str.upper().isin(["EN_CURSO", "RECURSANDO"])]
     else:
         df_f = df[df["estatus"].str.upper() == f_upper]
@@ -786,12 +792,16 @@ def consultar_historial(filtro: str = "") -> str:
     # Análisis adicional según filtro
     extra = ""
     if f_upper == "REPROBADA":
-        conteo = df_f.groupby("clave").size()
-        terceras = conteo[conteo >= 2]
-        if not terceras.empty:
-            extra = "\n\nEN RIESGO (2+ reprobaciones):\n"
-            for clave, veces in terceras.items():
+        # Contar intentos históricos desde el raw df para detectar riesgo real
+        terceras = []
+        for clave in df_f["clave"].unique():
+            veces = int(((df["clave"] == clave) & (df["estatus"].str.upper() == "REPROBADA")).sum())
+            if veces >= 2:
                 nombre = df_f[df_f["clave"] == clave]["nombre"].iloc[0] if len(df_f[df_f["clave"] == clave]) > 0 else clave
+                terceras.append((clave, nombre, veces))
+        if terceras:
+            extra = "\n\nEN RIESGO (2+ reprobaciones):\n"
+            for clave, nombre, veces in terceras:
                 extra += f"  ⚠ {clave} {nombre}: {veces} reprobaciones\n"
         # Categoria mas afectada
         cats = df_f["clave"].str.upper().map(lambda c: mapa.get(c, {}).get("categoria", "?"))
@@ -884,8 +894,10 @@ def priorizar_materias() -> str:
 
     # Recomendacion global
     datos = _session_ref.get("datos_estudiante")
-    max_materias = 4 if (datos and any(s in str(datos.situacion).upper() for s in ["CONDICIONAL", "IRREGULAR"])) else 7
-    out.append(f"Limite de carga del alumno: maximo {max_materias} materias por semestre")
+    if datos and "CONDICIONAL" in str(datos.situacion).upper():
+        out.append("Limite de carga del alumno: exactamente 3 materias por semestre (condicionado, ni mas ni menos)")
+    else:
+        out.append("Limite de carga del alumno: maximo 9 materias por semestre")
     out.append("")
 
     # Recorrer en orden de prioridad
@@ -1462,14 +1474,14 @@ ALL_TOOLS = [
 
 
 def crear_agente(api_key: str = "", modelo: str = ""):
-    key = api_key or settings.OPENROUTER_API_KEY
+    key = api_key or settings.CEREBRAS_API_KEY
     if not key:
         return None
 
     llm = ChatOpenAI(
-        model=modelo or "deepseek/deepseek-chat-v3-0324",
+        model=modelo or "gpt-oss-120b",
         openai_api_key=key,
-        openai_api_base="https://openrouter.ai/api/v1",
+        openai_api_base="https://api.cerebras.ai/v1",
         temperature=0.1,
         max_tokens=1024,
     )
@@ -1568,7 +1580,7 @@ _SINONIMOS = {
     "materia": ["materia", "clase", "asignatura", "curso"],
     "materias": ["materias", "clases", "asignaturas", "cursos"],
     "cargar": ["cargar", "inscribir", "meter", "llevar", "tomar", "registrar", "agarrar"],
-    "condicional": ["condicional", "condicionado", "irregular"],
+    "condicional": ["condicional", "condicionado"],
     "maximo": ["maximo", "max", "limite", "tope", "permitido"],
     "veces": ["veces", "oportunidades", "intentos", "chances"],
     "egreso": ["egreso", "egresar", "graduar", "titular", "titulacion", "graduacion", "terminar"],
@@ -1595,11 +1607,11 @@ _SINONIMOS = {
 _REGLAS_LOCALES = [
     # (palabras_clave, respuesta)
     (["materias", "condicional"],
-     "Un alumno condicional o irregular puede cargar MAXIMO 4 materias por semestre. Un alumno regular puede cargar entre 4 y 7."),
+     "Un alumno CONDICIONAL debe cargar EXACTAMENTE 3 materias por semestre (ni mas ni menos). Un alumno irregular o regular puede cargar hasta 9 materias."),
     (["materias", "maximo", "regular"],
-     "Un alumno regular puede cargar entre 4 y 7 materias por semestre."),
+     "Un alumno regular o irregular puede cargar hasta 9 materias por semestre."),
     (["materias", "cargar", "maximo"],
-     "Un alumno regular puede cargar entre 4 y 7 materias por semestre. Un alumno condicional/irregular: MAXIMO 4."),
+     "Un alumno regular o irregular puede cargar hasta 9 materias por semestre. Un alumno CONDICIONAL debe cargar exactamente 3 materias (ni mas ni menos)."),
     (["veces", "reprobar"],
      "Cada materia se puede cursar hasta 3 veces. Con 2 reprobaciones entra en TERCERA OPORTUNIDAD (ultimo intento). Con 3 reprobaciones es BAJA DEFINITIVA de esa materia."),
     (["oportunidades", "materia"],
@@ -1816,7 +1828,10 @@ def _consulta_datos_local(pregunta: str) -> Optional[str]:
     # "que materias ha reprobado?" / "cuales reprobo?" / "tiene reprobadas?"
     _reprobada_signals = ["reprobar", "reprobada", "reprobado", "reprobadas", "ha reprobar"]
     if any(s in q_exp for s in _reprobada_signals) and not any(s in q_exp for s in ["que pasa", "si reprobar", "impacto", "consecuencia", "bloquea"]):
-        rep = df[df["estatus"].str.upper() == "REPROBADA"]
+        # Usar historial_calculo (último estado por materia) para saber cuáles siguen reprobadas HOY
+        _hc = _session_ref.get("historial_calculo")
+        df_canon = _hc if (_hc is not None and hasattr(_hc, "empty") and not _hc.empty) else df
+        rep = df_canon[df_canon["estatus"].str.upper() == "REPROBADA"]
         if rep.empty:
             return "El estudiante no tiene materias reprobadas."
         conteo = rep.groupby("clave").size()
@@ -1829,7 +1844,8 @@ def _consulta_datos_local(pregunta: str) -> Optional[str]:
         for clave in conteo.index:
             filas = rep[rep["clave"] == clave]
             nombre = filas.iloc[0].get("nombre", "")
-            veces = int(conteo[clave])
+            # Contar intentos históricos reprobados desde el raw df
+            veces = int(((df["clave"] == clave) & (df["estatus"].str.upper() == "REPROBADA")).sum())
             # Cuantas materias bloquea
             cascada = _cadena_impacto(clave, mapa)
             entry = (clave, nombre, veces, len(cascada))
@@ -1930,8 +1946,8 @@ def _consulta_datos_local(pregunta: str) -> Optional[str]:
     if datos and ("situacion" in q or "condicional" in q_exp or "regular" in q_exp or "irregular" in q_exp):
         sit = str(datos.situacion)
         extra = ""
-        if "CONDICIONAL" in sit.upper() or "IRREGULAR" in sit.upper():
-            extra = "\n\nRestricciones: maximo 4 materias por semestre."
+        if "CONDICIONAL" in sit.upper():
+            extra = "\n\nRestricciones: carga fija de exactamente 3 materias por semestre (ni mas ni menos)."
         return f"**Situacion: {sit}**{extra}"
 
     # "en que semestre va?" / "semestre actual"

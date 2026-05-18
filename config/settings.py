@@ -33,6 +33,9 @@ class Settings:
     # OpenRouter
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 
+    # Cerebras
+    CEREBRAS_API_KEY: str = os.getenv("CEREBRAS_API_KEY", "")
+
     # Environment
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = os.getenv("DEBUG", "True") == "True"

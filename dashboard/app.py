@@ -933,7 +933,7 @@ def _init_agente():
         st.session_state.chat_open = False
 
     # Recrear agente si no existe o si cambió el modelo
-    _modelo_actual = "deepseek/deepseek-chat-v3-0324"
+    _modelo_actual = "gpt-oss-120b"
     if st.session_state.agente_executor is None or st.session_state.get("_agente_modelo") != _modelo_actual:
         try:
             executor = crear_agente(modelo=_modelo_actual)
@@ -2783,6 +2783,17 @@ def main():
             except Exception as e:
                 st.warning(f"Error al calcular alertas: {str(e)}")
 
+            st.markdown("""
+<div class="nav-cta-banner">
+  <div class="nav-cta-label">📌 Siguiente sección</div>
+  <div class="nav-cta-desc">📈 Progreso</div>
+</div>""", unsafe_allow_html=True)
+            st.markdown('<div class="nav-btn-attached">', unsafe_allow_html=True)
+            if st.button("➡️  📈 Progreso", key="nav_t1_next", type="primary", use_container_width=True):
+                import streamlit.components.v1 as _tnav1
+                _tnav1.html('<script>window.parent.document.querySelectorAll(\'button[role="tab"]\')[1].click();</script>', height=0)
+            st.markdown('</div>', unsafe_allow_html=True)
+
         # ===================================================================
         # PESTAÑA 2: PROGRESO
         # ===================================================================
@@ -3011,6 +3022,20 @@ def main():
                         display_df.columns = ["Clave", "Asignatura", "Calificación", "Créditos", "Estatus"]
                         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
+            if st.button("← 📋 Resumen General", key="nav_t2_prev"):
+                import streamlit.components.v1 as _tnav2b
+                _tnav2b.html('<script>window.parent.document.querySelectorAll(\'button[role="tab"]\')[0].click();</script>', height=0)
+            st.markdown("""
+<div class="nav-cta-banner">
+  <div class="nav-cta-label">📌 Siguiente sección</div>
+  <div class="nav-cta-desc">📚 Elección Libre y Adicionales</div>
+</div>""", unsafe_allow_html=True)
+            st.markdown('<div class="nav-btn-attached">', unsafe_allow_html=True)
+            if st.button("➡️  📚 Elección Libre y Adicionales", key="nav_t2_next", type="primary", use_container_width=True):
+                import streamlit.components.v1 as _tnav2
+                _tnav2.html('<script>window.parent.document.querySelectorAll(\'button[role="tab"]\')[2].click();</script>', height=0)
+            st.markdown('</div>', unsafe_allow_html=True)
+
         # ===================================================================
         # PESTAÑA 3: ELECCIÓN LIBRE Y ADICIONALES
         # ===================================================================
@@ -3189,6 +3214,20 @@ def main():
                 faltan = 6 - aprobados_count
                 st.info(f"📚 Faltan {faltan} nivel(es) para completar el requisito de inglés (hasta Tópicos Selectos II)")
 
+            if st.button("← 📈 Progreso", key="nav_t3_prev"):
+                import streamlit.components.v1 as _tnav3b
+                _tnav3b.html('<script>window.parent.document.querySelectorAll(\'button[role="tab"]\')[1].click();</script>', height=0)
+            st.markdown("""
+<div class="nav-cta-banner">
+  <div class="nav-cta-label">📌 Siguiente sección</div>
+  <div class="nav-cta-desc">🎓 Pre-Especialidades</div>
+</div>""", unsafe_allow_html=True)
+            st.markdown('<div class="nav-btn-attached">', unsafe_allow_html=True)
+            if st.button("➡️  🎓 Pre-Especialidades", key="nav_t3_next", type="primary", use_container_width=True):
+                import streamlit.components.v1 as _tnav3
+                _tnav3.html('<script>window.parent.document.querySelectorAll(\'button[role="tab"]\')[3].click();</script>', height=0)
+            st.markdown('</div>', unsafe_allow_html=True)
+
         # ===================================================================
         # PESTAÑA 4: PRE-ESPECIALIDADES
         # ===================================================================
@@ -3197,79 +3236,115 @@ def main():
             st.caption("Cada pre-especialidad requiere 5 materias para completarse. La pre-especialidad con más materias aprobadas será tu titulación.")
 
             try:
-                preespecialidades = calcular_progreso_preespecialidades(historial_calculo, mapa_curricular)
+                _MAP_ESP_NOMBRE = {
+                    "TICS": "Innovación en TIC",
+                    "BUSINESS_INTELLIGENCE": "Inteligencia Organizacional y de Negocios",
+                }
+                _TODAS_PREESP = ["Innovación en TIC", "Inteligencia Organizacional y de Negocios"]
 
-                if preespecialidades:
-                    cols_pre = st.columns(len(preespecialidades))
-                    for idx, (nombre, datos_pre) in enumerate(preespecialidades.items()):
-                        with cols_pre[idx]:
-                            aprobadas = datos_pre["aprobadas"]
-                            en_curso = datos_pre["en_curso"]
-                            total_requerido = 5
-                            porcentaje = (aprobadas / total_requerido * 100) if total_requerido > 0 else 0
+                _esp_forzada = st.session_state.get("especialidad_forzada", None)
+                _nombre_seleccionado = _MAP_ESP_NOMBRE.get(_esp_forzada) if _esp_forzada else None
 
-                            if aprobadas >= 5:
-                                color_badge = "🟢"
-                                estado = "COMPLETADA"
-                            elif aprobadas >= 3:
-                                color_badge = "🟡"
-                                estado = "EN PROGRESO"
-                            else:
-                                color_badge = "⚪"
-                                estado = "INICIAL"
+                preespecialidades_todas = calcular_progreso_preespecialidades(historial_calculo, mapa_curricular)
 
-                            fig = go.Figure(data=[go.Pie(
-                                labels=["Aprobadas", "En Curso", "Pendientes"],
-                                values=[aprobadas, en_curso, max(0, total_requerido - aprobadas - en_curso)],
-                                marker=dict(colors=["#28a745", "#ffc107", "#e0e0e0"]),
-                                hole=0.5
-                            )])
-                            fig.update_layout(
-                                title=f"{color_badge} {nombre}",
-                                showlegend=True,
-                                height=350
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                            st.markdown(f"""
-                            <div class='metric-box'>
-                                <strong>{porcentaje:.1f}% Completado</strong><br>
-                                <strong>Estado: {estado}</strong><br>
-                                ✅ Aprobadas: {aprobadas}/5<br>
-                                ⏳ En Curso: {en_curso}<br>
-                                📚 Faltan: {max(0, 5 - aprobadas)} materias
-                            </div>
-                            """, unsafe_allow_html=True)
+                # Asegurar que ambas pre-especialidades existan en el dict aunque no haya materias
+                for _n in _TODAS_PREESP:
+                    if _n not in preespecialidades_todas:
+                        preespecialidades_todas[_n] = {"total": 0, "aprobadas": 0, "en_curso": 0, "claves": []}
 
-                            # Lista de materias de esta pre-especialidad
-                            if datos_pre.get("claves"):
-                                _mapa_dict_pre = {str(m.get("clave", "")).upper(): m for m in mapa_curricular}
-                                _status_pre = {}
-                                for _, _r in historial_calculo.iterrows():
-                                    _status_pre[str(_r.get("clave", "")).upper()] = _r.get("estatus", "")
-                                _filas_pre = []
-                                for _cl in datos_pre["claves"]:
-                                    _mi = _mapa_dict_pre.get(_cl, {})
-                                    _filas_pre.append({
-                                        "Clave": _cl,
-                                        "Nombre": _mi.get("nombre", ""),
-                                        "Estado": _status_pre.get(_cl, "PENDIENTE"),
-                                    })
-                                with st.expander(f"Ver materias ({len(_filas_pre)})"):
-                                    st.dataframe(pd.DataFrame(_filas_pre), use_container_width=True, hide_index=True)
+                # Si hay selección, mostrar SOLO esa; si no, mostrar todas
+                if _nombre_seleccionado:
+                    preespecialidades = {_nombre_seleccionado: preespecialidades_todas[_nombre_seleccionado]}
+                    st.info(f"Mostrando pre-especialidad seleccionada: **{_nombre_seleccionado}**. Cambia la selección en el sidebar para ver la otra.")
                 else:
-                    st.info("No se detectaron materias de pre-especialidad en el historial.")
+                    preespecialidades = preespecialidades_todas
+
+                cols_pre = st.columns(len(preespecialidades))
+                for idx, (nombre, datos_pre) in enumerate(preespecialidades.items()):
+                    with cols_pre[idx]:
+                        aprobadas = datos_pre["aprobadas"]
+                        en_curso = datos_pre["en_curso"]
+                        total_requerido = 5
+                        porcentaje = (aprobadas / total_requerido * 100) if total_requerido > 0 else 0
+
+                        if aprobadas >= 5:
+                            color_badge = "🟢"
+                            estado = "COMPLETADA"
+                        elif aprobadas >= 3:
+                            color_badge = "🟡"
+                            estado = "EN PROGRESO"
+                        else:
+                            color_badge = "⚪"
+                            estado = "INICIAL"
+
+                        fig = go.Figure(data=[go.Pie(
+                            labels=["Aprobadas", "En Curso", "Pendientes"],
+                            values=[aprobadas, en_curso, max(0, total_requerido - aprobadas - en_curso)],
+                            marker=dict(colors=["#28a745", "#ffc107", "#e0e0e0"]),
+                            hole=0.5
+                        )])
+                        fig.update_layout(
+                            title=f"{color_badge} {nombre}",
+                            showlegend=True,
+                            height=350
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        st.markdown(f"""
+                        <div class='metric-box'>
+                            <strong>{porcentaje:.1f}% Completado</strong><br>
+                            <strong>Estado: {estado}</strong><br>
+                            ✅ Aprobadas: {aprobadas}/5<br>
+                            ⏳ En Curso: {en_curso}<br>
+                            📚 Faltan: {max(0, 5 - aprobadas)} materias
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        _CLAVES_PREESP = {
+                            "Innovación en TIC": ["ID3416", "ID3417", "ID3418", "ID3419", "ID3469"],
+                            "Inteligencia Organizacional y de Negocios": ["ID3420", "ID3421", "ID3422", "ID3423", "ID3424"],
+                        }
+                        _mapa_dict_pre = {str(m.get("clave", "")).upper(): m for m in mapa_curricular}
+                        _status_pre = {}
+                        for _, _r in historial_calculo.iterrows():
+                            _status_pre[str(_r.get("clave", "")).upper()] = _r.get("estatus", "")
+
+                        _grupos_pre = {"Finalizadas": [], "En Curso": [], "Recursando": [], "Reprobadas": [], "Pendientes": []}
+                        for _cl in _CLAVES_PREESP.get(nombre, []):
+                            _mi = _mapa_dict_pre.get(_cl, {})
+                            _est = _status_pre.get(_cl, "")
+                            _info = {"Clave": _cl, "Nombre": _mi.get("nombre", _cl), "Créditos": _mi.get("creditos", 0)}
+                            if _est == "APROBADA":
+                                _grupos_pre["Finalizadas"].append(_info)
+                            elif _est == "EN_CURSO":
+                                _grupos_pre["En Curso"].append(_info)
+                            elif _est == "RECURSANDO":
+                                _grupos_pre["Recursando"].append(_info)
+                            elif _est == "REPROBADA":
+                                _grupos_pre["Reprobadas"].append(_info)
+                            else:
+                                _grupos_pre["Pendientes"].append(_info)
+
+                        _opc_pre = [s for s in ["Pendientes", "En Curso", "Recursando", "Reprobadas", "Finalizadas"] if _grupos_pre.get(s)]
+                        if _opc_pre:
+                            _total_pre = sum(len(_grupos_pre[s]) for s in _opc_pre)
+                            with st.expander(f"Ver materias ({_total_pre})"):
+                                _sel_pre = st.selectbox("Filtrar por:", _opc_pre, key=f"sel_pre_{idx}")
+                                st.dataframe(pd.DataFrame(_grupos_pre[_sel_pre]), use_container_width=True, hide_index=True)
             except Exception as e:
                 st.warning(f"Error al calcular pre-especialidades: {str(e)}")
 
-        st.markdown("""
+            if st.button("← 📚 Elección Libre y Adicionales", key="nav_t4_prev"):
+                import streamlit.components.v1 as _tnav4b
+                _tnav4b.html('<script>window.parent.document.querySelectorAll(\'button[role="tab"]\')[2].click();</script>', height=0)
+            st.markdown("""
 <div class="nav-cta-banner">
   <div class="nav-cta-label">📌 Siguiente paso</div>
   <div class="nav-cta-desc">El sistema experto analiza seriaciones y prioridades para sugerir las mejores materias a inscribir.</div>
 </div>""", unsafe_allow_html=True)
-        st.markdown('<div class="nav-btn-attached">', unsafe_allow_html=True)
-        if st.button("🧠  Ver Materias Candidatas para Cargar", key="btn_next_experto", type="primary", use_container_width=True):
-            st.switch_page(st.Page(_pg_experto, title="Materias Candidatas para Cargar", icon=":material/psychology:"))
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('<div class="nav-btn-attached">', unsafe_allow_html=True)
+            if st.button("🧠  Ver Materias Candidatas para Cargar", key="btn_next_experto", type="primary", use_container_width=True):
+                st.switch_page(st.Page(_pg_experto, title="Materias Candidatas para Cargar", icon=":material/psychology:"))
+            st.markdown('</div>', unsafe_allow_html=True)
 
     def _pg_experto():
         st.divider()
@@ -3646,6 +3721,19 @@ def main():
                         # --- Botón para generar cargas ---
                         st.divider()
 
+                        _modos = {
+                            "Balanceado (recomendado)": "balanceado",
+                            "Priorizar compacidad (horario concentrado, menos huecos)": "compacidad",
+                            "Priorizar número de materias (más materias, aunque más dispersas)": "num_materias",
+                        }
+                        _modo_sel = st.selectbox(
+                            "¿Qué quieres priorizar?",
+                            list(_modos.keys()),
+                            index=0,
+                            key="sel_modo_carga",
+                        )
+                        _modo_carga = _modos[_modo_sel]
+
                         if st.button("🚀 Generar Cargas Académicas", type="primary", key="btn_generar_cargas"):
                             with st.spinner("Optimizando cargas con NSGA-III..."):
                                 cargas = generar_cargas_nsga3(
@@ -3658,6 +3746,7 @@ def main():
                                     poblacion_size=100,
                                     generaciones=50,
                                     n_resultados=3,
+                                    modo_prioridad=_modo_carga,
                                 )
 
                             if not cargas:
