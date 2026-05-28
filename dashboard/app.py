@@ -155,6 +155,30 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+def ocultar_matricula(matricula: str, ocultar: bool = False) -> str:
+    """
+    Oculta los últimos 4 dígitos de la matrícula con asteriscos.
+    
+    Args:
+        matricula: Matrícula del estudiante (ej: "A01234567")
+        ocultar: Si True, muestra "A01****567"; si False, muestra completa
+    
+    Returns:
+        Matrícula ocultada o completa según parámetro
+    """
+    if not ocultar or not matricula:
+        return str(matricula)
+    
+    matricula_str = str(matricula).strip()
+    
+    # Si tiene menos de 4 caracteres, no se puede ocultar
+    if len(matricula_str) < 4:
+        return matricula_str
+    
+    # Ocultar los últimos 4 dígitos con asteriscos
+    return matricula_str[:-4] + "****"
+
+
 def cargar_mapa_curricular() -> dict:
     """Carga el mapa curricular oficial (real_completo, semestres 1-8)."""
     try:
@@ -1318,9 +1342,11 @@ def _generar_pdf_asesoria() -> bytes:
     # 1. DATOS DEL ESTUDIANTE
     # ══════════════════════════════════════════════════════════
     story.append(Paragraph("1. Datos del Estudiante", s_h2))
+    _nombre_pdf = "Estudiante Anónimo" if st.session_state.get("modo_incognito", False) else str(datos.nombre)
+    _matricula_display = ocultar_matricula(datos.matricula, st.session_state.get("modo_incognito", False))
     story.append(_kv_table([
-        ["Matricula:", str(datos.matricula)],
-        ["Nombre:", str(datos.nombre)],
+        ["Matricula:", _matricula_display],
+        ["Nombre:", _nombre_pdf],
         ["Plan de estudios:", str(datos.plan_estudios)],
         ["Situacion:", str(datos.situacion)],
         ["Promedio general:", str(datos.promedio_general)],
@@ -1940,6 +1966,15 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuración")
 
+        # ── MODO INCOGNITO: Ocultar nombre del estudiante ──
+        st.subheader("🕵️ Privacidad")
+        st.session_state.modo_incognito = st.checkbox(
+            "Modo incognito (ocultar nombre del estudiante)",
+            value=st.session_state.get("modo_incognito", False),
+            help="Útil para presentaciones. Muestra 'Estudiante Anónimo' en lugar del nombre."
+        )
+        st.markdown("---")
+
         # ── PREFERENCIA DE ESPECIALIDAD (solo cuando ambos archivos cargados) ──
         if "datos_estudiante" in st.session_state:
             st.subheader("🎯 Especialidad")
@@ -2071,10 +2106,12 @@ def main():
                     if hist_mat and datos.matricula and hist_mat != datos.matricula:
                         if os.path.exists(temp_path):
                             os.remove(temp_path)
+                        _hist_mat_display = ocultar_matricula(hist_mat, st.session_state.get("modo_incognito", False))
+                        _kardex_mat_display = ocultar_matricula(datos.matricula, st.session_state.get("modo_incognito", False))
                         st.error(
                             f"❌ Los archivos no corresponden al mismo estudiante.\n\n"
-                            f"**Historial académico:** matrícula `{hist_mat}`\n\n"
-                            f"**Kardex subido:** matrícula `{datos.matricula}`\n\n"
+                            f"**Historial académico:** matrícula `{_hist_mat_display}`\n\n"
+                            f"**Kardex subido:** matrícula `{_kardex_mat_display}`\n\n"
                             "Por favor sube el kardex del mismo estudiante."
                         )
                         st.stop()
@@ -2464,7 +2501,9 @@ def main():
         ])
 
         with tab1:
-            st.header(f"👤 {datos.nombre}  —  {datos.matricula}")
+            _nombre_display = "Estudiante Anónimo" if st.session_state.get("modo_incognito", False) else datos.nombre
+            _matricula_display = ocultar_matricula(datos.matricula, st.session_state.get("modo_incognito", False))
+            st.header(f"👤 {_nombre_display}  —  {_matricula_display}")
 
             # Alerta si el estatus NO es Regular
             if datos.situacion.upper() != "REGULAR":

@@ -9,11 +9,26 @@ class SupabaseService:
     
     def __init__(self):
         """Inicializa la conexión con Supabase"""
-        self.client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        self.client = None
+        self.available = False
+        
+        # Solo inicializar si las credenciales están disponibles
+        if settings.SUPABASE_URL and settings.SUPABASE_KEY:
+            try:
+                self.client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+                self.available = True
+            except Exception as e:
+                print(f"⚠️ Supabase no disponible: {str(e)}")
+                self.available = False
+        else:
+            print("⚠️ Supabase: credenciales no configuradas en .env")
     
     # ======== ESTUDIANTES ========
     def crear_estudiante(self, matricula: str, datos: Dict) -> Dict:
         """Crea un nuevo registro de estudiante"""
+        if not self.available:
+            print(f"⚠️ Supabase no disponible - skipping crear_estudiante")
+            return {}
         try:
             response = self.client.table("estudiantes").insert(
                 {
@@ -32,6 +47,8 @@ class SupabaseService:
     
     def obtener_estudiante(self, matricula: str) -> Optional[Dict]:
         """Obtiene información de un estudiante"""
+        if not self.available:
+            return None
         try:
             response = self.client.table("estudiantes").select("*").eq("id", matricula).execute()
             return response.data[0] if response.data else None
@@ -41,6 +58,9 @@ class SupabaseService:
     
     def actualizar_estudiante(self, matricula: str, datos: Dict) -> Dict:
         """Actualiza información de un estudiante"""
+        if not self.available:
+            print(f"⚠️ Supabase no disponible - skipping actualizar_estudiante")
+            return {}
         try:
             response = self.client.table("estudiantes").update(datos).eq("id", matricula).execute()
             return response.data[0] if response.data else {}
@@ -51,6 +71,9 @@ class SupabaseService:
     # ======== MATERIAS ========
     def crear_materias(self, materias: List[Dict]) -> List[Dict]:
         """Inserta múltiples materias"""
+        if not self.available:
+            print(f"⚠️ Supabase no disponible - skipping crear_materias")
+            return []
         try:
             response = self.client.table("materias").insert(materias).execute()
             return response.data if response.data else []
@@ -60,6 +83,8 @@ class SupabaseService:
     
     def obtener_materia(self, clave: str) -> Optional[Dict]:
         """Obtiene información de una materia"""
+        if not self.available:
+            return None
         try:
             response = self.client.table("materias").select("*").eq("clave", clave).execute()
             return response.data[0] if response.data else None
@@ -69,6 +94,8 @@ class SupabaseService:
     
     def obtener_todas_materias(self) -> List[Dict]:
         """Obtiene todas las materias"""
+        if not self.available:
+            return []
         try:
             response = self.client.table("materias").select("*").execute()
             return response.data if response.data else []
@@ -79,6 +106,9 @@ class SupabaseService:
     # ======== HISTORIAL ACADÉMICO ========
     def crear_registro_historial(self, matricula: str, registros: List[Dict]) -> List[Dict]:
         """Inserta registros de historial académico"""
+        if not self.available:
+            print(f"⚠️ Supabase no disponible - skipping crear_registro_historial")
+            return []
         try:
             datos_para_insertar = []
             for reg in registros:
@@ -99,6 +129,8 @@ class SupabaseService:
     
     def obtener_historial_estudiante(self, matricula: str) -> List[Dict]:
         """Obtiene historial académico de un estudiante"""
+        if not self.available:
+            return []
         try:
             response = self.client.table("historial_academico").select("*").eq("estudiante_id", matricula).execute()
             return response.data if response.data else []
@@ -109,6 +141,9 @@ class SupabaseService:
     # ======== ALERTAS ========
     def crear_alerta(self, matricula: str, alerta: Dict) -> Dict:
         """Crea una alerta académica"""
+        if not self.available:
+            print(f"⚠️ Supabase no disponible - skipping crear_alerta")
+            return {}
         try:
             response = self.client.table("alertas").insert(
                 {
@@ -126,6 +161,8 @@ class SupabaseService:
     
     def obtener_alertas_estudiante(self, matricula: str) -> List[Dict]:
         """Obtiene alertas activas de un estudiante"""
+        if not self.available:
+            return []
         try:
             response = self.client.table("alertas").select("*").eq("estudiante_id", matricula).eq("activa", True).execute()
             return response.data if response.data else []
@@ -136,6 +173,9 @@ class SupabaseService:
     # ======== REQUISITOS ADICIONALES ========
     def crear_requisitos(self, matricula: str, requisitos: List[str]) -> List[Dict]:
         """Crea registros de requisitos adicionales"""
+        if not self.available:
+            print(f"⚠️ Supabase no disponible - skipping crear_requisitos")
+            return []
         try:
             datos = [
                 {
@@ -153,6 +193,8 @@ class SupabaseService:
     
     def obtener_requisitos_estudiante(self, matricula: str) -> List[Dict]:
         """Obtiene requisitos adicionales de un estudiante"""
+        if not self.available:
+            return []
         try:
             response = self.client.table("requisitos_adicionales").select("*").eq("estudiante_id", matricula).execute()
             return response.data if response.data else []
@@ -162,6 +204,9 @@ class SupabaseService:
     
     def actualizar_requisito(self, requisito_id: int, completado: bool) -> Dict:
         """Marca un requisito como completado"""
+        if not self.available:
+            print(f"⚠️ Supabase no disponible - skipping actualizar_requisito")
+            return {}
         try:
             response = self.client.table("requisitos_adicionales").update(
                 {"completado": completado}
